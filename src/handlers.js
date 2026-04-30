@@ -164,10 +164,25 @@ async function grepFile(state, path, cwd, matcher) {
 }
 
 function renderGrepFile(result) {
-  const summary = formatSerialLines(result.serials, result.lines, 0, result.lines.length)
-  const blocks = mergeBlocks(result.matches.map(line => blockForLine(result.structure, line, result.lines.length)))
+  const { serials, lines, matches, structure } = result
+  const indexes = buildSummaryIndexes(lines.length, matches, structure)
+  const summary = formatSerialIndexes(serials, lines, indexes)
+  const blocks = mergeBlocks(matches.map(line => blockForLine(structure, line, lines.length)))
   const renderedBlocks = blocks.map(([from, to]) => renderMatchBlock(result, from, to))
   return [`# ${result.path}`, "## Summary", `\`\`\`\n${summary}\n\`\`\``, ...renderedBlocks].join("\n\n")
+}
+
+function buildSummaryIndexes(totalLines, matches, structure) {
+  const set = new Set()
+  set.add(0)
+  set.add(totalLines - 1)
+  if (structure) for (const s of structure) set.add(s)
+  for (const m of matches) {
+    set.add(m)
+    if (m > 0) set.add(m - 1)
+    if (m < totalLines - 1) set.add(m + 1)
+  }
+  return [...set].sort((a, b) => a - b)
 }
 
 function renderMatchBlock(result, from, to) {
