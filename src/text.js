@@ -7,12 +7,15 @@ export function validateEditParams(params) {
   if (params.content == null) return failure("content is required. Use an empty string to delete.")
   return success(null)
 }
+
 export function resolveSerial(registry, serial) {
   const num = typeof serial === "string" && /[A-Z]/i.test(serial) ? alphaToNum(serial) : serial
   const entry = registry.resolve(num)
   if (!entry) return failure(`Serial ${serial} does not exist. Re-read the file and copy a current serial.`)
+  if (entry.stale) return failure(`Serial ${serial} is stale (file edited). Re-read the file before editing.`)
   return success(entry)
 }
+
 export function formatSerialLines(serials, lines, from, to) {
   const selected = serials.slice(from, to)
   const labels = selected.map(numToAlpha)

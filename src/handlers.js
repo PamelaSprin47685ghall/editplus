@@ -39,7 +39,7 @@ async function loadFile(state, path, cwd) {
   const data = await state.io.read(file.value).catch(error => failure(`Failed to read ${path}: ${error.message}`))
   if (!data.ok && data.error) return data
 
-  if (registry.mtimeChanged(file.value, data.mtimeMs)) registry.staleFile(file.value)
+  if (registry.mtimeChanged(file.value, data.mtimeMs)) registry.removeFile(file.value)
   registry.noteMtime(file.value, data.mtimeMs)
   return success({ path: file.value, ...data })
 }
@@ -50,7 +50,7 @@ async function handleRead(state, params) {
   const file = await loadFile(state, stripAt(params.path), params.projectDir)
   if (!file.ok) return file
   if (file.value.lines.length === 0) {
-    const [serial] = registry.assign(file.value.path, 0, 1)
+    const serials = registry.getSerials(file.value.path, 0); const serial = serials[0]
     return success(`${numToAlpha(serial)}|\n`)
   }
 
@@ -58,7 +58,7 @@ async function handleRead(state, params) {
   if (!range.ok) return range
 
   // Assign N+1 serials: N for real lines + 1 end sentinel (line = file length)
-  const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
+  const serials = registry.getSerials(file.value.path, file.value.lines.length)
   const lines = [...file.value.lines, ""]
   const text = range.value.indexes
     ? formatSerialIndexes(serials, lines, [...range.value.indexes, file.value.lines.length].sort((a, b) => a - b))
@@ -161,7 +161,7 @@ async function grepFile(state, path, cwd, matcher) {
   })
   if (matches.length === 0) return success(null)
 
-  const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
+  const serials = registry.getSerials(file.value.path, file.value.lines.length)
   return success({ ...file.value, lines: [...file.value.lines, ""], matches, serials, structure: detectStructure(file.value.path, file.value.whole_content) })
 }
 

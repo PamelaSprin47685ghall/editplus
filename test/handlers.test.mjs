@@ -28,12 +28,12 @@ describe("read", () => {
 
     assert.equal(first.ok, true)
     assert.equal(second.ok, true)
-    // Each read assigns fresh serials, monatonically increasing
+    // Each read reuses existing serials
     const s1 = serialsOf(first.value)
     const s2 = serialsOf(second.value)
     assert.ok(s1.length > 0)
     assert.ok(s2.length > 0)
-    assert.ok(s2[0] > s1[s1.length - 1], "later read gets higher serials")
+    assert.deepEqual(s1, s2, "later read reuses the same serials")
     // Range read returns exactly the requested line
     assert.match(range.value, /([A-Z]+)\|b\n/)
   })
@@ -65,8 +65,8 @@ describe("edit", () => {
 
     // begin and endExclusive that both resolve to line 1 → insertion at line 1
     const begin = r1.value.match(/([A-Z]+)\|b/)?.[1]
-    const end = r2.value.match(/([A-Z]+)\|b/)?.[1]
-    assert.ok(begin && end && begin !== end)
+    const end = begin
+    assert.ok(begin && end)
 
     const insert = await handlers.edit({ begin, endExclusive: end, content: "x\ny" })
     assert.equal(insert.ok, true)
@@ -102,7 +102,7 @@ describe("edit", () => {
 
     // Two different serials that both map to line 1 ("b")
     const begin = r1.value.match(/([A-Z]+)\|b/)?.[1]
-    const end = r2.value.match(/([A-Z]+)\|b/)?.[1]
+    const end = begin
     assert.ok(begin && end)
 
     const result = await handlers.edit({ begin, endExclusive: end, content: "X\n" })
@@ -173,10 +173,16 @@ describe("edit", () => {
     const [sa1, sa2] = serialsOf(ra.value)
     const [sb1] = serialsOf(rb.value)
 
-    // Old serials are reusable — even after an edit, stale serials still resolve correctly
-    assert.equal((await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "B" })).ok, true)
-    assert.equal((await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "x" })).ok, true)
-    assert.equal(await readFile(fa.file, "utf8"), "a\nx\nc\n")
+    
+    
+    
+
+    // Old serials are NOT reusable after an edit (stale rejection)
+    await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "B" })
+    assert.match(
+      (await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "x" })).error,
+      /stale/
+    )
 
     // Cross-file: begin from fa, end from fb
     assert.match(
