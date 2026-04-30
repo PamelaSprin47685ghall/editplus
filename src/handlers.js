@@ -73,8 +73,8 @@ async function handleEdit(state, params) {
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
-  const begin = resolveSerial(registry, params.begin)
-  const end = resolveSerial(registry, params.endExclusive)
+  const begin = resolveSerial(registry, params.begin, "editing")
+  const end = resolveSerial(registry, params.endExclusive, "editing")
   if (!begin.ok) return begin
   if (!end.ok) return end
   const boundary = validateBoundary(begin.value, end.value)
