@@ -39,6 +39,7 @@ export default function (pi) {
     promptGuidelines: [
       "Use read instead of cat, head, tail, or sed.",
       "Copy serial numbers exactly; edit uses them instead of paths.",
+      "Never guess serial numbers — yours must appear in some previous read/grep output. Never use a serial larger than the largest you have seen.",
       "Serials are file-specific — a serial from one file cannot be used for another file.",
       "Serials shown in ANY previous read/grep output can still be used — old serials remain valid.",
     ],
@@ -57,7 +58,7 @@ export default function (pi) {
       "All 3 params are ALWAYS required: begin, endExclusive, content. Never omit any of them.",
       "Serials are file-specific — using a serial from one file on another file will fail.",
       "You may use serials shown in ANY previous read/grep output — old serials still work even after edits.",
-      "Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — they are global unique IDs shown on the left in read/grep output.",
+      "Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — never use a serial larger than the largest you have seen in any output.",
 ",
       "endExclusive is EXCLUSIVE — serials from begin up to endExclusive-1 are replaced. To replace a block including its closing line, set endExclusive ONE PAST that line.",
       "endExclusive resolving to the same file line as begin = insert before that line (pure insertion).",
