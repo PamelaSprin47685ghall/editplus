@@ -16,15 +16,15 @@ afterEach(async () => {
 
 // Helper: extract serial numbers from read/grep output
 function serialsOf(text) {
-  return [...text.matchAll(/(\d+)\|/g)].map(m => Number(m[1]))
+  return [...text.matchAll(/([A-Z]+)\|/g)].map(m => m[1])
 }
 
 describe("read", () => {
   it("returns line content with monotonically increasing serials", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { dir, file } = await fixture("a\nb\nc\n")
     const first = await handlers.read({ path: file })
     const second = await handlers.read({ path: file })
-    const range = await handlers.read({ path: file, begin: 2, endExclusive: 3 })
+    const range = await handlers.read({ path: file, begin: "B", endExclusive: "C" })
 
     assert.equal(first.ok, true)
     assert.equal(second.ok, true)
@@ -35,14 +35,14 @@ describe("read", () => {
     assert.ok(s2.length > 0)
     assert.ok(s2[0] > s1[s1.length - 1], "later read gets higher serials")
     // Range read returns exactly the requested line
-    assert.match(range.value, /\d+\|b\n/)
+    assert.match(range.value, /([A-Z]+)\|b\n/)
   })
 
   it("sentinel serial shows on last line for empty content", async () => {
     const { file } = await fixture("")
     const result = await handlers.read({ path: file })
     assert.equal(result.ok, true)
-    assert.match(result.value, /\d+\|\s*\n/)
+    assert.match(result.value, /([A-Z]+)\|\s*\n/)
   })
 })
 
@@ -64,8 +64,8 @@ describe("edit", () => {
     const r2 = await handlers.read({ path: file })         // fresh serials for same lines
 
     // begin and endExclusive that both resolve to line 1 → insertion at line 1
-    const begin = Number(r1.value.match(/(\d+)\|b/)?.[1])
-    const end = Number(r2.value.match(/(\d+)\|b/)?.[1])
+    const begin = r1.value.match(/([A-Z]+)\|b/)?.[1]
+    const end = r2.value.match(/([A-Z]+)\|b/)?.[1]
     assert.ok(begin && end && begin !== end)
 
     const insert = await handlers.edit({ begin, endExclusive: end, content: "x\ny" })
@@ -75,8 +75,8 @@ describe("edit", () => {
 
     // Re-read after insert, then delete the inserted "y"
     const r3 = await handlers.read({ path: file })
-    const delBegin = Number(r3.value.match(/(\d+)\|y/)?.[1])
-    const delEnd = Number(r3.value.match(/(\d+)\|b/)?.[1])
+    const delBegin = r3.value.match(/([A-Z]+)\|y/)?.[1]
+    const delEnd = r3.value.match(/([A-Z]+)\|b/)?.[1]
     assert.ok(delBegin && delEnd)
 
     const remove = await handlers.edit({ begin: delBegin, endExclusive: delEnd, content: "" })
@@ -101,8 +101,8 @@ describe("edit", () => {
     const r2 = await handlers.read({ path: file })  // second read, same content, different serials
 
     // Two different serials that both map to line 1 ("b")
-    const begin = Number(r1.value.match(/(\d+)\|b/)?.[1])
-    const end = Number(r2.value.match(/(\d+)\|b/)?.[1])
+    const begin = r1.value.match(/([A-Z]+)\|b/)?.[1]
+    const end = r2.value.match(/([A-Z]+)\|b/)?.[1]
     assert.ok(begin && end)
 
     const result = await handlers.edit({ begin, endExclusive: end, content: "X\n" })
@@ -113,7 +113,7 @@ describe("edit", () => {
   it("edits an empty file using sentinel begin and endExclusive", async () => {
     const { file } = await fixture("")
     const read = await handlers.read({ path: file })
-    const serial = Number(read.value.match(/(\d+)\|/)?.[1])
+    const serial = read.value.match(/([A-Z]+)\|/)?.[1]
 
     // sentinel serial pointed past end of empty file → insertion at line 0
     const result = await handlers.edit({ begin: serial, endExclusive: serial, content: "first line" })
@@ -174,8 +174,8 @@ describe("edit", () => {
     const [sb1] = serialsOf(rb.value)
 
     // Old serials are reusable — even after an edit, stale serials still resolve correctly
-    assert.equal((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "B" })).ok, true)
-    assert.equal((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "x" })).ok, true)
+    assert.equal((await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "B" })).ok, true)
+    assert.equal((await handlers.edit({ begin: sa2, endExclusive: serialsOf(ra.value)[2], content: "x" })).ok, true)
     assert.equal(await readFile(fa.file, "utf8"), "a\nx\nc\n")
 
     // Cross-file: begin from fa, end from fb
@@ -207,11 +207,11 @@ describe("grep", () => {
   it("matches strings, regexes, and exposes editable serials", async () => {
     const { dir, file } = await fixture("const alpha = 1\nconst beta = 2\n")
     const result = await handlers.grep({ path: join(dir, "*.js"), pattern: "alpha|beta" })
-    const serial = Number(result.value.match(/(\d+)\|const alpha/)?.[1])
+    const serial = result.value.match(/([A-Z]+)\|const alpha/)?.[1]
 
     assert.equal(result.ok, true)
     assert.match(result.value, /# .*sample\.js/)
-    assert.equal((await handlers.edit({ begin: serial, endExclusive: serial + 1, content: "const alpha = 3" })).ok, true)
+    assert.equal((await handlers.edit({ begin: serial, endExclusive: serialsOf(result.value)[1], content: "const alpha = 3" })).ok, true)
     assert.equal(await readFile(file, "utf8"), "const alpha = 3\nconst beta = 2\n")
   })
 

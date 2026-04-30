@@ -1,4 +1,5 @@
 import { splitLines } from "./io.js"
+import { alphaToNum, numToAlpha } from "./alpha.js"
 
 export function validateEditParams(params) {
   if (params.begin == null) return failure("begin is required. Use a serial from read or grep.")
@@ -7,21 +8,22 @@ export function validateEditParams(params) {
   return success(null)
 }
 export function resolveSerial(registry, serial) {
-  const entry = registry.resolve(serial)
+  const num = typeof serial === "string" && /[A-Z]/i.test(serial) ? alphaToNum(serial) : serial
+  const entry = registry.resolve(num)
   if (!entry) return failure(`Serial ${serial} does not exist. Re-read the file and copy a current serial.`)
   return success(entry)
 }
-
 export function formatSerialLines(serials, lines, from, to) {
   const selected = serials.slice(from, to)
-  const width = Math.max(...selected.map(serial => String(serial).length), 1)
-  return selected.map((serial, index) => `${String(serial).padStart(width)}|${lines[from + index]}`).join("")
+  const labels = selected.map(numToAlpha)
+  const width = Math.max(...labels.map(s => s.length), 1)
+  return labels.map((label, index) => `${label.padStart(width)}|${lines[from + index]}`).join("")
 }
 
 export function formatSerialIndexes(serials, lines, indexes) {
-  const selected = indexes.map(index => serials[index])
-  const width = Math.max(...selected.map(serial => String(serial).length), 1)
-  return indexes.map(index => `${String(serials[index]).padStart(width)}|${lines[index]}`).join("")
+  const labels = indexes.map(index => numToAlpha(serials[index]))
+  const width = Math.max(...labels.map(s => s.length), 1)
+  return indexes.map((index, i) => `${labels[i].padStart(width)}|${lines[index]}`).join("")
 }
 
 export function splitReplacement(content, fallbackEnding) {
@@ -50,8 +52,8 @@ export function stripAt(path) {
 }
 
 export function formatEditResult(path, params, serials) {
-  const serialText = serials.length ? ` New serials: ${serials.join(", ")}.` : ""
-  return `Edited ${path} at [${params.begin}, ${params.endExclusive}).${serialText}`
+  const serialText = serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""
+  return `Edited ${path} at [${numToAlpha(params.begin)}, ${numToAlpha(params.endExclusive)}).${serialText}`
 }
 
 export function success(value) {

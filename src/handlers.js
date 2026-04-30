@@ -1,4 +1,5 @@
 import * as realIO from "./io.js"
+import { alphaToNum, numToAlpha } from "./alpha.js"
 import { expandGlob, inspectPath } from "./pathing.js"
 import { readRange, validateBoundary } from "./ranges.js"
 import { registry } from "./registry.js"
@@ -50,7 +51,7 @@ async function handleRead(state, params) {
   if (!file.ok) return file
   if (file.value.lines.length === 0) {
     const [serial] = registry.assign(file.value.path, 0, 1)
-    return success(`${serial}|\n`)
+    return success(`${numToAlpha(serial)}|\n`)
   }
 
   const range = readRange(registry, params, file.value)
@@ -68,6 +69,7 @@ async function handleRead(state, params) {
 }
 
 async function handleEdit(state, params) {
+  params = { ...params, begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive }
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
