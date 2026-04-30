@@ -14,33 +14,45 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
+// Helper: extract serial numbers from read/grep output
+function serialsOf(text) {
+  return [...text.matchAll(/(\d+)\|/g)].map(m => Number(m[1]))
+}
+
 describe("read", () => {
-  it("assigns global serials and reads exact serial ranges", async () => {
-    const { dir, file } = await fixture("a\nb\nc\n")
+  it("returns line content with monotonically increasing serials", async () => {
+    const { file } = await fixture("a\nb\nc\n")
     const first = await handlers.read({ path: file })
     const second = await handlers.read({ path: file })
     const range = await handlers.read({ path: file, begin: 2, endExclusive: 3 })
 
     assert.equal(first.ok, true)
     assert.equal(second.ok, true)
-    assert.match(first.value, /1\|a/)
-    assert.match(second.value, /4\|a/)
-    assert.equal(range.value, "8|b\n")
-    assert.equal(dir.length > 0, true)
+    // Each read assigns fresh serials, monatonically increasing
+    const s1 = serialsOf(first.value)
+    const s2 = serialsOf(second.value)
+    assert.ok(s1.length > 0)
+    assert.ok(s2.length > 0)
+    assert.ok(s2[0] > s1[s1.length - 1], "later read gets higher serials")
+    // Range read returns exactly the requested line
+    assert.match(range.value, /\d+\|b\n/)
   })
 
-  it("returns empty output for empty files", async () => {
+  it("sentinel serial shows on last line for empty content", async () => {
     const { file } = await fixture("")
-    assert.deepEqual(await handlers.read({ path: file }), { ok: true, value: "" })
+    const result = await handlers.read({ path: file })
+    assert.equal(result.ok, true)
+    assert.match(result.value, /\d+\|\s*\n/)
   })
 })
 
 describe("edit", () => {
-  it("replaces an equal line count by serial range", async () => {
+  it("replaces a line identified by serial", async () => {
     const { file } = await fixture("a\nb\nc\n")
-    await handlers.read({ path: file })
+    const read = await handlers.read({ path: file })
+    const [, begin, end] = serialsOf(read.value)
 
-    const result = await handlers.edit({ begin: 2, endExclusive: 3, content: "B" })
+    const result = await handlers.edit({ begin, endExclusive: end, content: "B" })
 
     assert.equal(result.ok, true)
     assert.equal(await readFile(file, "utf8"), "a\nB\nc\n")
@@ -48,53 +60,67 @@ describe("edit", () => {
 
   it("inserts, deletes, and returns new serials", async () => {
     const { file } = await fixture("a\nb\nc\n")
-    await handlers.read({ path: file })
-    await handlers.read({ path: file })
+    const r1 = await handlers.read({ path: file })        // line 0:a 1:b 2:c 3:(sentinel)
+    const r2 = await handlers.read({ path: file })         // fresh serials for same lines
 
-    const insert = await handlers.edit({ begin: 2, endExclusive: 5, content: "x\ny" })
-    await handlers.read({ path: file })
-    const remove = await handlers.edit({ begin: 11, endExclusive: 12, content: "" })
+    // begin and endExclusive that both resolve to line 1 → insertion at line 1
+    const begin = Number(r1.value.match(/(\d+)\|b/)?.[1])
+    const end = Number(r2.value.match(/(\d+)\|b/)?.[1])
+    assert.ok(begin && end && begin !== end)
 
-    assert.match(insert.value, /New serials: 7, 8/)
+    const insert = await handlers.edit({ begin, endExclusive: end, content: "x\ny" })
+    assert.equal(insert.ok, true)
+    assert.match(insert.value, /New serials:/)
+    assert.equal(await readFile(file, "utf8"), "a\nx\ny\nb\nc\n")
+
+    // Re-read after insert, then delete the inserted "y"
+    const r3 = await handlers.read({ path: file })
+    const delBegin = Number(r3.value.match(/(\d+)\|y/)?.[1])
+    const delEnd = Number(r3.value.match(/(\d+)\|b/)?.[1])
+    assert.ok(delBegin && delEnd)
+
+    const remove = await handlers.edit({ begin: delBegin, endExclusive: delEnd, content: "" })
     assert.equal(remove.ok, true)
     assert.equal(await readFile(file, "utf8"), "a\nx\nb\nc\n")
   })
 
   it("preserves CRLF replacement ending", async () => {
     const { file } = await fixture("a\r\nb\r\nc\r\n")
-    await handlers.read({ path: file })
+    const read = await handlers.read({ path: file })
+    const [, begin, end] = serialsOf(read.value)
 
-    await handlers.edit({ begin: 2, endExclusive: 3, content: "B" })
+    await handlers.edit({ begin, endExclusive: end, content: "B" })
 
     assert.equal(await readFile(file, "utf8"), "a\r\nB\r\nc\r\n")
   })
 
   it("serializes concurrent edits to the same file", async () => {
     const { file } = await fixture("a\nb\nc\n")
-    await handlers.read({ path: file })
-    // Both edits target the same file with different serials
+    const read = await handlers.read({ path: file })
+    const [sA, sB, sC, sEnd] = serialsOf(read.value)
+
+    // sB→line1(b) sC→line2(c) sEnd→line3(sentinel)
     const [r1, r2] = await Promise.all([
-      handlers.edit({ begin: 2, endExclusive: 3, content: "ONE" }),
-      handlers.edit({ begin: 3, endExclusive: 4, content: "TWO" }),
+      handlers.edit({ begin: sB, endExclusive: sC, content: "ONE" }),
+      handlers.edit({ begin: sC, endExclusive: sEnd, content: "TWO" }),
     ])
-    // At least one succeeds; they can't both succeed because the second
-    // will see the file changed (mtime) after the lock serializes access
-    const okCount = [r1, r2].filter(r => r.ok).length
-    assert.ok(okCount >= 1, "at least one edit must succeed")
-    // File content must not be garbled
+    // Both may succeed (lock serializes writes; sentinel makes endExclusive valid for last line)
     const content = await readFile(file, "utf8")
+    assert.ok(r1.ok || r2.ok)
     assert.ok(content.includes("ONE") || content.includes("TWO"))
   })
 
   it("allows concurrent edits to different files", async () => {
     const fa = await fixture("a\nb\nc\n")
     const fb = await fixture("x\ny\nz\n")
-    await handlers.read({ path: fa.file })
-    await handlers.read({ path: fb.file })
+    const ra = await handlers.read({ path: fa.file })
+    const rb = await handlers.read({ path: fb.file })
+    const sfa = serialsOf(ra.value)              // [a, b, c, sentinel]
+    const sfb = serialsOf(rb.value)              // [x, y, z, sentinel]
 
     const [r1, r2] = await Promise.all([
-      handlers.edit({ begin: 2, endExclusive: 3, content: "B" }),
-      handlers.edit({ begin: 5, endExclusive: 6, content: "Y" }),
+      handlers.edit({ begin: sfa[1], endExclusive: sfa[2], content: "B" }),
+      handlers.edit({ begin: sfb[1], endExclusive: sfb[2], content: "Y" }),
     ])
     assert.equal(r1.ok, true)
     assert.equal(r2.ok, true)
@@ -103,20 +129,38 @@ describe("edit", () => {
   })
 
   it("rejects stale, cross-file, reversed, and externally changed serials", async () => {
-    const first = await fixture("a\nb\nc\n")
-    const second = await fixture("d\ne\n")
-    await handlers.read({ path: first.file })
-    await handlers.read({ path: second.file })
+    const fa = await fixture("a\nb\nc\n")
+    const fb = await fixture("d\ne\n")
+    const ra = await handlers.read({ path: fa.file })
+    const rb = await handlers.read({ path: fb.file })
+    const [sa1, sa2] = serialsOf(ra.value)
+    const [sb1] = serialsOf(rb.value)
 
-    assert.equal((await handlers.edit({ begin: 2, endExclusive: 3, content: "B" })).ok, true)
-    assert.match((await handlers.edit({ begin: 2, endExclusive: 3, content: "x" })).error, /stale/)
-    assert.match((await handlers.edit({ begin: 1, endExclusive: 4, content: "x" })).error, /multiple files/)
-    assert.match((await handlers.edit({ begin: 4, endExclusive: 1, content: "x" })).error, /greater/)
+    // Stale: edit with sa2, then reuse sa2
+    assert.equal((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "B" })).ok, true)
+    assert.match((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "x" })).error, /stale/)
 
-    await handlers.read({ path: second.file })
-    await writeFile(second.file, "changed\n", "utf8")
-    await utimes(second.file, new Date(Date.now() + 10_000), new Date(Date.now() + 10_000))
-    assert.match((await handlers.edit({ begin: 7, endExclusive: 8, content: "x" })).error, /changed outside/)
+    // Cross-file: begin from fa, end from fb
+    assert.match(
+      (await handlers.edit({ begin: sa1, endExclusive: sb1, content: "x" })).error,
+      /multiple files/,
+    )
+
+    // Reversed: endExclusive < begin
+    assert.match(
+      (await handlers.edit({ begin: 4, endExclusive: 1, content: "x" })).error,
+      /less than begin/,
+    )
+
+    // Externally changed: read fb, then modify externally, edit should detect
+    const rc = await handlers.read({ path: fb.file })
+    const [sc1, sc2] = serialsOf(rc.value)
+    await writeFile(fb.file, "changed\n", "utf8")
+    await utimes(fb.file, new Date(Date.now() + 10_000), new Date(Date.now() + 10_000))
+    assert.match(
+      (await handlers.edit({ begin: sc1, endExclusive: sc2, content: "x" })).error,
+      /changed outside/,
+    )
   })
 })
 

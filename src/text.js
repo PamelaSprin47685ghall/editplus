@@ -4,7 +4,7 @@ export function validateEditParams(params) {
   if (params.begin == null) return failure("begin is required. Use a serial from read or grep.")
   if (params.endExclusive == null) return failure("endExclusive is required. Use the serial where replacement should stop.")
   if (params.content == null) return failure("content is required. Use an empty string to delete.")
-  if (params.endExclusive <= params.begin) return failure("endExclusive must be greater than begin.")
+  if (params.endExclusive < params.begin) return failure("endExclusive must not be less than begin.")
   return success(null)
 }
 

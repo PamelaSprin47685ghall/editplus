@@ -48,15 +48,20 @@ async function handleRead(state, params) {
 
   const file = await loadFile(state, stripAt(params.path), params.projectDir)
   if (!file.ok) return file
-  if (file.value.lines.length === 0) return success("")
+  if (file.value.lines.length === 0) {
+    const [serial] = registry.assign(file.value.path, 0, 1)
+    return success(`${serial}|\n`)
+  }
 
   const range = readRange(registry, params, file.value)
   if (!range.ok) return range
 
-  const serials = registry.assign(file.value.path, 0, file.value.lines.length)
+  // Assign N+1 serials: N for real lines + 1 end sentinel (line = file length)
+  const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
+  const lines = [...file.value.lines, ""]
   const text = range.value.indexes
-    ? formatSerialIndexes(serials, file.value.lines, range.value.indexes)
-    : formatSerialLines(serials, file.value.lines, range.value.from, range.value.to)
+    ? formatSerialIndexes(serials, lines, range.value.indexes)
+    : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
   return params.begin == null
     ? success(`${range.value.heading}\n\n${text}\n\n${range.value.hint}`)
     : success(text)
@@ -79,7 +84,8 @@ async function handleEdit(state, params) {
 
     await state.io.write(prepared.value.path, prepared.value.lines)
     const updated = await state.io.read(prepared.value.path)
-    registry.noteMtime(prepared.value.path, updated.mtimeMs)
+      .catch(() => null)
+    if (updated) registry.noteMtime(prepared.value.path, updated.mtimeMs)
 
     const newSerials = registry.edit(
       prepared.value.path,
@@ -153,7 +159,7 @@ async function grepFile(state, path, cwd, matcher) {
   })
   if (matches.length === 0) return success(null)
 
-  const serials = registry.assign(file.value.path, 0, file.value.lines.length)
+  const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
   return success({ ...file.value, matches, serials, structure: detectStructure(file.value.path, file.value.whole_content) })
 }
 
