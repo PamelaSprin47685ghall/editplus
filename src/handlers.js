@@ -60,7 +60,7 @@ async function handleRead(state, params) {
   const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
   const lines = [...file.value.lines, ""]
   const text = range.value.indexes
-    ? formatSerialIndexes(serials, lines, range.value.indexes)
+    ? formatSerialIndexes(serials, lines, [...range.value.indexes, file.value.lines.length].sort((a, b) => a - b))
     : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
   return params.begin == null
     ? success(`${range.value.heading}\n\n${text}\n\n${range.value.hint}`)
