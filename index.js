@@ -15,9 +15,9 @@ const readParams = {
 const editParams = {
   type: "object",
   properties: {
-    begin: { type: "number", description: "Inclusive start serial from read or grep." },
-    endExclusive: { type: "number", description: "Exclusive end serial. It may resolve to the same file line for pure insertion." },
-    content: { type: "string", description: "Replacement text. Empty string deletes the range." },
+    begin: { type: "number", description: "Inclusive start serial from read or grep. Always required along with endExclusive and content." },
+    endExclusive: { type: "number", description: "Exclusive end serial. Always required. May resolve to the same file line as begin for pure insertion." },
+    content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range." },
   },
   required: ["begin", "endExclusive", "content"],
 }
@@ -51,11 +51,12 @@ export default function (pi) {
   pi.registerTool({
     name: "edit",
     label: "edit",
-    description: "Replace file content by serial range [begin, endExclusive). No path or old text is required.",
+    description: "Edit file by serial range. All 3 params (begin, endExclusive, content) are ALWAYS required. No path or old text needed.",
     promptGuidelines: [
-      "Read or grep before editing so the serials are current.",
-      "endExclusive is the serial where replacement stops; if it resolves to the same line as begin, edit inserts content before that line.",
-      "Empty content deletes the selected range.",
+      "All 3 params are ALWAYS required: begin, endExclusive, content. Never omit any of them.",
+      "Read or grep first to get current serials.",
+      "endExclusive resolves to a file line; same line as begin = insert before that line.",
+      "Empty content deletes the range.",
     ],
     parameters: editParams,
     async execute(toolCallId, params, signal) {
