@@ -160,7 +160,7 @@ async function grepFile(state, path, cwd, matcher) {
   if (matches.length === 0) return success(null)
 
   const serials = registry.assign(file.value.path, 0, file.value.lines.length + 1)
-  return success({ ...file.value, matches, serials, structure: detectStructure(file.value.path, file.value.whole_content) })
+  return success({ ...file.value, lines: [...file.value.lines, ""], matches, serials, structure: detectStructure(file.value.path, file.value.whole_content) })
 }
 
 function renderGrepFile(result) {
