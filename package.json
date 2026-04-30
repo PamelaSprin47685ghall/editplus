@@ -1,0 +1,21 @@
+{
+  "name": "editplus",
+  "version": "0.1.0",
+  "description": "Serial-number-based file read/edit with global sequential line numbers (流水号), no file path needed in edit",
+  "type": "module",
+  "exports": "./index.js",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "gsd": {
+    "extension": true
+  },
+  "pi": {
+    "extensions": [
+      "index.js"
+    ]
+  },
+  "dependencies": {
+    "@kreuzberg/tree-sitter-language-pack": "^1.6.2"
+  }
+}
