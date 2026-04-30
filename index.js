@@ -59,7 +59,6 @@ export default function (pi) {
       "Serials are file-specific — using a serial from one file on another file will fail.",
       "You may use serials shown in ANY previous read/grep output — old serials still work even after edits.",
       "Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — never use a serial larger than the largest you have seen in any output.",
-",
       "endExclusive is EXCLUSIVE — serials from begin up to endExclusive-1 are replaced. To replace a block including its closing line, set endExclusive ONE PAST that line.",
       "endExclusive resolving to the same file line as begin = insert before that line (pure insertion).",
       "Empty content deletes the range.",
