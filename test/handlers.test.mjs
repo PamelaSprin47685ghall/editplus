@@ -84,6 +84,43 @@ describe("edit", () => {
     assert.equal(await readFile(file, "utf8"), "a\nx\nb\nc\n")
   })
 
+  it("uses sentinel serial as endExclusive to edit the last line", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const read = await handlers.read({ path: file })
+    const serials = serialsOf(read.value)        // [a, b, c, sentinel]
+
+    // sentinel is the last serial, points past the last real line
+    const result = await handlers.edit({ begin: serials[2], endExclusive: serials[3], content: "C" })
+    assert.equal(result.ok, true)
+    assert.equal(await readFile(file, "utf8"), "a\nb\nC\n")
+  })
+
+  it("inserts at a line when begin and endExclusive resolve to the same line", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const r1 = await handlers.read({ path: file })
+    const r2 = await handlers.read({ path: file })  // second read, same content, different serials
+
+    // Two different serials that both map to line 1 ("b")
+    const begin = Number(r1.value.match(/(\d+)\|b/)?.[1])
+    const end = Number(r2.value.match(/(\d+)\|b/)?.[1])
+    assert.ok(begin && end)
+
+    const result = await handlers.edit({ begin, endExclusive: end, content: "X\n" })
+    assert.equal(result.ok, true)
+    assert.equal(await readFile(file, "utf8"), "a\nX\nb\nc\n")
+  })
+
+  it("edits an empty file using sentinel begin and endExclusive", async () => {
+    const { file } = await fixture("")
+    const read = await handlers.read({ path: file })
+    const serial = Number(read.value.match(/(\d+)\|/)?.[1])
+
+    // sentinel serial pointed past end of empty file → insertion at line 0
+    const result = await handlers.edit({ begin: serial, endExclusive: serial, content: "first line" })
+    assert.equal(result.ok, true)
+    assert.equal(await readFile(file, "utf8"), "first line\n")
+  })
+
   it("preserves CRLF replacement ending", async () => {
     const { file } = await fixture("a\r\nb\r\nc\r\n")
     const read = await handlers.read({ path: file })
