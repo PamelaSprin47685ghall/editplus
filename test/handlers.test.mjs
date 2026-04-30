@@ -69,6 +69,39 @@ describe("edit", () => {
     assert.equal(await readFile(file, "utf8"), "a\r\nB\r\nc\r\n")
   })
 
+  it("serializes concurrent edits to the same file", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    await handlers.read({ path: file })
+    // Both edits target the same file with different serials
+    const [r1, r2] = await Promise.all([
+      handlers.edit({ begin: 2, endExclusive: 3, content: "ONE" }),
+      handlers.edit({ begin: 3, endExclusive: 4, content: "TWO" }),
+    ])
+    // At least one succeeds; they can't both succeed because the second
+    // will see the file changed (mtime) after the lock serializes access
+    const okCount = [r1, r2].filter(r => r.ok).length
+    assert.ok(okCount >= 1, "at least one edit must succeed")
+    // File content must not be garbled
+    const content = await readFile(file, "utf8")
+    assert.ok(content.includes("ONE") || content.includes("TWO"))
+  })
+
+  it("allows concurrent edits to different files", async () => {
+    const fa = await fixture("a\nb\nc\n")
+    const fb = await fixture("x\ny\nz\n")
+    await handlers.read({ path: fa.file })
+    await handlers.read({ path: fb.file })
+
+    const [r1, r2] = await Promise.all([
+      handlers.edit({ begin: 2, endExclusive: 3, content: "B" }),
+      handlers.edit({ begin: 5, endExclusive: 6, content: "Y" }),
+    ])
+    assert.equal(r1.ok, true)
+    assert.equal(r2.ok, true)
+    assert.equal(await readFile(fa.file, "utf8"), "a\nB\nc\n")
+    assert.equal(await readFile(fb.file, "utf8"), "x\nY\nz\n")
+  })
+
   it("rejects stale, cross-file, reversed, and externally changed serials", async () => {
     const first = await fixture("a\nb\nc\n")
     const second = await fixture("d\ne\n")

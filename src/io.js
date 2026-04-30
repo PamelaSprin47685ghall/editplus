@@ -1,5 +1,18 @@
 import { readFile, stat, writeFile } from "node:fs/promises"
 
+const locks = new Map()
+
+export async function withLock(path, fn) {
+  while (locks.has(path)) {
+    await locks.get(path).catch(() => {})
+  }
+  const promise = fn().finally(() => {
+    if (locks.get(path) === promise) locks.delete(path)
+  })
+  locks.set(path, promise)
+  return promise
+}
+
 export async function read(path) {
   const [fileStat, whole_content] = await Promise.all([
     stat(path),

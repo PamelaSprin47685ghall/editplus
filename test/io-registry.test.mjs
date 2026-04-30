@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { read, splitLines } from "../src/io.js"
+import { read, splitLines, withLock } from "../src/io.js"
 import { registry } from "../src/registry.js"
 
 const tempDirs = []
@@ -29,6 +29,28 @@ describe("io", () => {
     assert.equal(result.whole_content, "a\r\nb")
     assert.deepEqual(result.lines, ["a\r\n", "b"])
     assert.equal(typeof result.mtimeMs, "number")
+  })
+
+  it("serializes operations on the same path", async () => {
+    const order = []
+    const result = await Promise.all([
+      withLock("/same", async () => { order.push(1); await new Promise(r => setTimeout(r, 10)); order.push(2) }),
+      withLock("/same", async () => { order.push(3) }),
+    ])
+    // Second call (3) must wait for first (1,2) to finish
+    assert.deepEqual(order, [1, 2, 3])
+    assert.equal(result[0], undefined)
+    assert.equal(result[1], undefined)
+  })
+
+  it("allows concurrent operations on different paths", async () => {
+    const order = []
+    const result = await Promise.all([
+      withLock("/a", async () => { order.push(1); await new Promise(r => setTimeout(r, 10)); order.push(2) }),
+      withLock("/b", async () => { order.push(3) }),
+    ])
+    // /b runs in parallel with /a — 3 appears before 2
+    assert.deepEqual(order, [1, 3, 2])
   })
 })
 

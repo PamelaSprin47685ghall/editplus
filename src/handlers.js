@@ -63,20 +63,32 @@ async function handleRead(state, params) {
 }
 
 async function handleEdit(state, params) {
-  const prepared = await prepareEdit(state, params)
-  if (!prepared.ok) return prepared
+  const validation = validateEditParams(params)
+  if (!validation.ok) return validation
 
-  await state.io.write(prepared.value.path, prepared.value.lines)
-  const updated = await state.io.read(prepared.value.path)
-  registry.noteMtime(prepared.value.path, updated.mtimeMs)
+  const begin = resolveSerial(registry, params.begin)
+  const end = resolveSerial(registry, params.endExclusive)
+  if (!begin.ok) return begin
+  if (!end.ok) return end
+  const boundary = validateBoundary(begin.value, end.value)
+  if (!boundary.ok) return boundary
 
-  const newSerials = registry.edit(
-    prepared.value.path,
-    prepared.value.begin.line,
-    prepared.value.end.line,
-    prepared.value.insertedLines.length,
-  )
-  return success(formatEditResult(prepared.value.path, params, newSerials))
+  return state.io.withLock(begin.value.path, async () => {
+    const prepared = await prepareEdit(state, params)
+    if (!prepared.ok) return prepared
+
+    await state.io.write(prepared.value.path, prepared.value.lines)
+    const updated = await state.io.read(prepared.value.path)
+    registry.noteMtime(prepared.value.path, updated.mtimeMs)
+
+    const newSerials = registry.edit(
+      prepared.value.path,
+      prepared.value.begin.line,
+      prepared.value.end.line,
+      prepared.value.insertedLines.length,
+    )
+    return success(formatEditResult(prepared.value.path, params, newSerials))
+  })
 }
 
 async function prepareEdit(state, params) {
