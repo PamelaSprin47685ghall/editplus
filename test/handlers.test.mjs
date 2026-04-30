@@ -173,9 +173,10 @@ describe("edit", () => {
     const [sa1, sa2] = serialsOf(ra.value)
     const [sb1] = serialsOf(rb.value)
 
-    // Stale: edit with sa2, then reuse sa2
+    // Old serials are reusable — even after an edit, stale serials still resolve correctly
     assert.equal((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "B" })).ok, true)
-    assert.match((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "x" })).error, /stale/)
+    assert.equal((await handlers.edit({ begin: sa2, endExclusive: sa2 + 1, content: "x" })).ok, true)
+    assert.equal(await readFile(fa.file, "utf8"), "a\nx\nc\n")
 
     // Cross-file: begin from fa, end from fb
     assert.match(
@@ -183,10 +184,11 @@ describe("edit", () => {
       /multiple files/,
     )
 
-    // Reversed: endExclusive < begin
+    // Reversed: endExclusive < begin in SERIAL NUMBER (possible with mixed old/new),
+    // now caught by validateBoundary after resolution
     assert.match(
       (await handlers.edit({ begin: 4, endExclusive: 1, content: "x" })).error,
-      /less than begin/,
+      /reversed/,
     )
 
     // Externally changed: read fb, then modify externally, edit should detect

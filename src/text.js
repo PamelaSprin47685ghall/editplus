@@ -4,14 +4,11 @@ export function validateEditParams(params) {
   if (params.begin == null) return failure("begin is required. Use a serial from read or grep.")
   if (params.endExclusive == null) return failure("endExclusive is required. Use the serial where replacement should stop.")
   if (params.content == null) return failure("content is required. Use an empty string to delete.")
-  if (params.endExclusive < params.begin) return failure("endExclusive must not be less than begin.")
   return success(null)
 }
-
 export function resolveSerial(registry, serial) {
   const entry = registry.resolve(serial)
   if (!entry) return failure(`Serial ${serial} does not exist. Re-read the file and copy a current serial.`)
-  if (entry.stale) return failure(`Serial ${serial} is stale. Re-read the file before editing.`)
   return success(entry)
 }
 
