@@ -42,8 +42,6 @@ export default function (pi) {
       "Serials are file-specific — a serial from one file cannot be used for another file.",
       "Serials shown in ANY previous read/grep output can still be used — old serials remain valid.",
     ],
-      "Serials are file-specific — a serial from one file cannot be used for another file.",
-    ],
     parameters: readParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
@@ -56,14 +54,14 @@ export default function (pi) {
     label: "edit",
     description: "Edit file by serial range. All 3 params (begin, endExclusive, content) are ALWAYS required. No path or old text needed.",
     promptGuidelines: [
-    promptGuidelines: [
       "All 3 params are ALWAYS required: begin, endExclusive, content. Never omit any of them.",
       "Serials are file-specific — using a serial from one file on another file will fail.",
       "You may use serials shown in ANY previous read/grep output — old serials still work even after edits.",
-      "Never guess serial numbers; only use ones actually shown in read/grep output.",
-      "endExclusive resolves to a file line; same line as begin = insert before that line.",
+      "Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — they are global unique IDs shown on the left in read/grep output.",
+",
+      "endExclusive is EXCLUSIVE — serials from begin up to endExclusive-1 are replaced. To replace a block including its closing line, set endExclusive ONE PAST that line.",
+      "endExclusive resolving to the same file line as begin = insert before that line (pure insertion).",
       "Empty content deletes the range.",
-    ],
     ],
     parameters: editParams,
     async execute(toolCallId, params, signal) {
@@ -77,14 +75,13 @@ export default function (pi) {
     label: "grep",
     description: "Search files with a JavaScript regular expression and return serial-numbered matches that can be edited directly.",
     promptGuidelines: [
-    promptGuidelines: [
       "Use grep when you know a token or regex and need editable serials.",
       "grep serials map to real files and can be passed directly to edit.",
       "Path may be a single file or glob.",
       "Serials from grep output belong to the matched file only — do not use them on other files.",
       "Serials from ANY previous grep remain valid; you do not need to re-read before editing.",
     ],
-    ],
+    parameters: grepParams,
     parameters: grepParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
