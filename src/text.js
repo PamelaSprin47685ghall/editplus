@@ -8,11 +8,11 @@ export function validateEditParams(params) {
   return success(null)
 }
 
-export function resolveSerial(registry, serial, action = "use") {
+export function resolveSerial(registry, serial, action = "use", role = "serial") {
   const num = typeof serial === "string" && /[A-Z]/i.test(serial) ? alphaToNum(serial) : serial
   const entry = registry.resolve(num)
-  if (!entry) return failure(`Serial ${serial} does not exist. Re-read the file and copy a current serial.`)
-  if (entry.stale) return failure(`Serial ${serial} is stale (line was edited or deleted). Re-read the file before ${action}.`)
+  if (!entry) return failure(`${role} ${serial} does not exist. Re-read the file and copy a current serial.`)
+  if (entry.stale) return failure(`${role} ${serial} is stale (line was edited or deleted). Re-read the file before ${action}.`)
   return success(entry)
 }
 

@@ -443,6 +443,61 @@ describe("read handlers", () => {
     assert.equal(range.ok, true)
     assert.equal(range.value, `${serials[0]}|a\n${serials[1]}|b\n`)
   })
+
+  it("reports missing read serials distinctly", async () => {
+    const { file } = await fixture("a\nb\n")
+
+    const result = await handlers.read({ path: file, begin: 99999 })
+
+    assert.equal(result.ok, false)
+    assert.match(result.error, /begin serial 99999 does not exist/)
+  })
+
+  it("reports deleted begin serials during read", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const full = await handlers.read({ path: file })
+    const serials = serialsOf(full.value)
+
+    await handlers.edit({ begin: serials[0], endExclusive: serials[1], content: "A" })
+    const result = await handlers.read({ path: file, begin: serials[0], endExclusive: serials[2] })
+
+    assert.equal(result.ok, false)
+    assert.match(result.error, new RegExp(`begin serial ${serials[0]} is stale`))
+    assert.match(result.error, /line was edited or deleted/)
+    assert.match(result.error, /before reading/)
+  })
+
+  it("reports deleted endExclusive serials during read", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const full = await handlers.read({ path: file })
+    const serials = serialsOf(full.value)
+
+    await handlers.edit({ begin: serials[1], endExclusive: serials[2], content: "B" })
+    const result = await handlers.read({ path: file, begin: serials[0], endExclusive: serials[1] })
+
+    assert.equal(result.ok, false)
+    assert.match(result.error, new RegExp(`endExclusive serial ${serials[1]} is stale`))
+    assert.match(result.error, /line was edited or deleted/)
+    assert.match(result.error, /before reading/)
+  })
+
+  it("reports external modification distinctly for range reads", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const full = await handlers.read({ path: file })
+    const serials = serialsOf(full.value)
+
+    await writeFile(file, "changed\n", "utf8")
+    await utimes(file, new Date(Date.now() + 10_000), new Date(Date.now() + 10_000))
+    const range = await handlers.read({ path: file, begin: serials[0], endExclusive: serials[1] })
+
+    assert.equal(range.ok, false)
+    assert.match(range.error, /File changed outside editplus/)
+    assert.match(range.error, /before reading a serial range/)
+
+    const refreshed = await handlers.read({ path: file })
+    assert.equal(refreshed.ok, true)
+    assert.match(refreshed.value, /changed/)
+  })
 })
 
 // ─── h a n d l e r   e d i t ─────────────────────────────────────────────

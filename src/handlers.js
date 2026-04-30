@@ -32,14 +32,17 @@ export function createHandlers(deps = {}) {
   }
 }
 
-async function loadFile(state, path, cwd) {
+async function loadFile(state, path, cwd, options = {}) {
   const file = await state.inspect(path, cwd)
   if (!file.ok) return file
 
   const data = await state.io.read(file.value).catch(error => failure(`Failed to read ${path}: ${error.message}`))
   if (!data.ok && data.error) return data
 
-  if (registry.mtimeChanged(file.value, data.mtimeMs)) registry.removeFile(file.value)
+  if (registry.mtimeChanged(file.value, data.mtimeMs)) {
+    registry.removeFile(file.value)
+    if (options.failOnExternalChange) return failure(options.externalChangeMessage)
+  }
   registry.noteMtime(file.value, data.mtimeMs)
   return success({ path: file.value, ...data })
 }
@@ -47,7 +50,10 @@ async function loadFile(state, path, cwd) {
 async function handleRead(state, params) {
   if (!params.path) return failure("path is required. Provide a file path to read.")
 
-  const file = await loadFile(state, stripAt(params.path), params.projectDir)
+  const file = await loadFile(state, stripAt(params.path), params.projectDir, {
+    failOnExternalChange: params.begin != null,
+    externalChangeMessage: "File changed outside editplus. Re-read the full file before reading a serial range.",
+  })
   if (!file.ok) return file
   if (file.value.lines.length === 0) {
     const serials = registry.getSerials(file.value.path, 0); const serial = serials[0]
@@ -73,8 +79,8 @@ async function handleEdit(state, params) {
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
-  const begin = resolveSerial(registry, params.begin, "editing")
-  const end = resolveSerial(registry, params.endExclusive, "editing")
+  const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
+  const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
   if (!begin.ok) return begin
   if (!end.ok) return end
   const boundary = validateBoundary(begin.value, end.value)
@@ -103,8 +109,8 @@ async function prepareEdit(state, params) {
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
-  const begin = resolveSerial(registry, params.begin)
-  const end = resolveSerial(registry, params.endExclusive)
+  const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
+  const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
   if (!begin.ok) return begin
   if (!end.ok) return end
   const boundary = validateBoundary(begin.value, end.value)
