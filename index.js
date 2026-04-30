@@ -32,6 +32,12 @@ const grepParams = {
 }
 
 export default function (pi) {
+  pi.on("tool_call", (event) => {
+    if (event.toolName === "edit" && event.input.path === undefined) {
+      event.input.path = ""
+    }
+  })
+
   pi.registerTool({
     name: "read",
     label: "read",
@@ -81,7 +87,6 @@ export default function (pi) {
       "Serials from grep output belong to the matched file only — do not use them on other files.",
       "Serials from ANY previous grep remain valid; you do not need to re-read before editing.",
     ],
-    parameters: grepParams,
     parameters: grepParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
