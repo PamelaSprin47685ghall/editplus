@@ -6,8 +6,8 @@ const readParams = {
   type: "object",
   properties: {
     path: { type: "string", description: "File path to read." },
-    begin: { type: "number", description: "Inclusive serial from a previous read or grep output." },
-    endExclusive: { type: "number", description: "Exclusive serial where the requested range stops." },
+    begin: { type: "string", description: "Inclusive serial from a previous read or grep output." },
+    endExclusive: { type: "string", description: "Exclusive serial where the requested range stops." },
   },
   required: ["path"],
 }
@@ -15,8 +15,8 @@ const readParams = {
 const editParams = {
   type: "object",
   properties: {
-    begin: { type: "number", description: "Inclusive start serial from read or grep. Always required along with endExclusive and content." },
-    endExclusive: { type: "number", description: "Exclusive end serial. Always required. May resolve to the same file line as begin for pure insertion." },
+    begin: { type: "string", description: "Inclusive start serial from read or grep. Always required along with endExclusive and content." },
+    endExclusive: { type: "string", description: "Exclusive end serial. Always required. May resolve to the same file line as begin for pure insertion." },
     content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range." },
   },
   required: ["begin", "endExclusive", "content"],
