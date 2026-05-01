@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { readFile, utimes, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { cleanupTempDirs, fixture, handlers, resetTestState, tagsOf } from "./test-utils.mjs"
-
 afterEach(async () => {
   resetTestState()
   await cleanupTempDirs()
