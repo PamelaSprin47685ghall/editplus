@@ -7,7 +7,7 @@ const readParams = {
   properties: {
     path: { type: "string", description: "File path or directory to read. If a directory is provided, returns a recursive size listing (pseudo du -hxd1)." },
     begin: { type: "string", description: "Inclusive serial from a previous read or grep output." },
-    endExclusive: { type: "string", description: "THINK TWICE: The line at endExclusive is EXCLUDED from the read output." },
+    endExclusive: { type: "string", description: "(Recommended) THINK TWICE: The line at endExclusive is EXCLUDED from the read output." },
     endInclusive: { type: "string", description: "THINK TWICE: The line at endInclusive is INCLUDED in the read output. Mutually exclusive with endExclusive." },
   },
   required: ["path"],
@@ -16,7 +16,7 @@ const editParams = {
   type: "object",
   properties: {
     begin: { type: "string", description: "Inclusive start serial from read or grep. Always required." },
-    endExclusive: { type: "string", description: "THINK TWICE: The line at endExclusive is PRESERVED. Use this if you want to replace up to, but NOT including, this line. (Useful for pure insertions when begin == endExclusive)" },
+    endExclusive: { type: "string", description: "(Recommended) THINK TWICE: The line at endExclusive is PRESERVED. Use this if you want to replace up to, but NOT including, this line. (Useful for pure insertions when begin == endExclusive)" },
     endInclusive: { type: "string", description: "THINK TWICE: The line at endInclusive is REPLACED. Use this if your replacement should include this line. Mutually exclusive with endExclusive." },
     content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range. Must NOT include the closing brace/tag if you used endExclusive on it!" },
   },
