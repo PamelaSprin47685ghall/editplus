@@ -125,7 +125,7 @@ export const stripAt = p => p.startsWith("@") ? p.slice(1) : p
 export const formatEditResult = (path, p, serials, end = p.endExclusive) => `Edited ${path} at [${numToAlpha(p.begin)}, ${numToAlpha(end)}).${serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""}`
 export const success = value => ({ ok: true, value })
 export const failure = (error, meta = {}) => ({ ok: false, error, ...meta })
-
+export const detailedSymbol = Symbol("detailed")
 export function splitLines(text) {
   const res = []
   for (let i = 0, start = 0; i < text.length; i++) {

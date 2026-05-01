@@ -28,8 +28,7 @@ export class LineRegistry {
     const newIdx = state.segs.length
     const seg = { x: start, z: line }
     state.segs.push(seg)
-    this.#allocations.push({ x: start, count, path })
-    if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
+    this.#pushAlloc(start, count, path)
 
     state.byX = [...state.byX.filter(idx => idx !== SENTINEL), newIdx, SENTINEL]
 
@@ -84,6 +83,7 @@ export class LineRegistry {
   }
 
   #getPathForSerial(serial) {
+    if (this.#allocations.length === 0) return undefined
     let low = 0
     let high = this.#allocations.length - 1
     while (low <= high) {
@@ -98,6 +98,10 @@ export class LineRegistry {
       }
     }
     return undefined
+  }
+  #pushAlloc(x, count, path) {
+    this.#allocations.push({ x, count, path })
+    if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
   }
 
   resolve(serial) {
@@ -178,8 +182,7 @@ export class LineRegistry {
       this.#nextSerial += insertedLineCount
       const newSeg = { x: start, z: lo }
       state.segs.push(newSeg)
-      this.#allocations.push({ x: start, count: insertedLineCount, path })
-      if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
+      this.#pushAlloc(start, insertedLineCount, path)
       mid.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
       newSerials = Array.from({ length: insertedLineCount }, (_, i) => start + i)
     }

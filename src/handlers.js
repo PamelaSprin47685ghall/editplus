@@ -5,7 +5,7 @@ import { stat } from "node:fs/promises"
 import {
   alphaToNum, numToAlpha, readRange, validateBoundary, blockForLine, detectStructure,
   compilePattern, endingOf, failure, formatEditResult, formatSerialIndexes, formatSerialLines,
-  resolveSerial, splitReplacement, stripAt, success, validateEditParams
+  resolveSerial, splitReplacement, stripAt, success, validateEditParams, detailedSymbol
 } from "./text.js"
 
 export const createHandlers = (deps = {}) => {
@@ -52,7 +52,7 @@ async function appendSummary(state, path, errorMsg, projectDir, preloadedFileVal
 }
 
 async function handleRead(state, params) {
-  if (!params.path) {
+  if (params.path == null) {
     const s = params.begin ?? params.endInclusive ?? params.endExclusive
     if (s != null) {
       const num = typeof s === "string" ? alphaToNum(s) : s
@@ -137,7 +137,7 @@ async function handleEdit(state, params) {
     for (let i = e.line, o = b.line + ins.length; i < ec; i++, o++) diffLines.push(` ${pad(o + 1)} ${strip(data.lines[i])}`)
     if (ec < data.lines.length) diffLines.push(` ${" ".repeat(w)} ...`)
 
-    return success({ isDetailed: true, text: formatEditResult(b.path, params, ser, dispEnd), details: { diff: diffLines.join("\n"), firstChangedLine: b.line + 1 } })
+    return success({ [detailedSymbol]: true, text: formatEditResult(b.path, params, ser, dispEnd), details: { diff: diffLines.join("\n"), firstChangedLine: b.line + 1 } })
   })
 }
 
