@@ -16,14 +16,15 @@ export const createHandlers = (deps = {}) => {
 async function loadFile(state, path, cwd, failOnExt = false) {
   const file = await state.inspect(path, cwd)
   if (!file.ok) return file
-  const data = await state.io.read(file.value).catch(e => failure(`Failed to read ${path}: ${e.message}`))
-  if (!data.ok && data.error) return data
-  if (registry.mtimeChanged(file.value, data.mtimeMs)) {
+  const result = await state.io.read(file.value).catch(e => failure(`Failed to read ${path}: ${e.message}`))
+  if (!result.ok) return result
+  const { mtimeMs, whole_content, lines } = result.value
+  if (registry.mtimeChanged(file.value, mtimeMs)) {
     registry.removeFile(file.value)
     if (failOnExt) return { ok: false, error: "File changed outside editplus. Re-read the full file before reading a serial range.", code: "EXTERNAL_CHANGE" }
   }
-  registry.noteMtime(file.value, data.mtimeMs)
-  return success({ path: file.value, ...data })
+  registry.noteMtime(file.value, mtimeMs)
+  return success({ path: file.value, mtimeMs, whole_content, lines })
 }
 
 function renderFileSummary(fileValue, params = {}) {
@@ -107,8 +108,9 @@ async function handleEdit(state, params) {
   const { b, e } = bounds
 
   return state.io.withLock(b.path, async () => {
-    const data = await state.io.read(b.path).catch(e => failure(`Failed to read: ${e.message}`))
-    if (!data.ok && data.error) return data
+    const result = await state.io.read(b.path).catch(e => failure(`Failed to read: ${e.message}`))
+    if (!result.ok) return result
+    const data = result.value
     if (registry.mtimeChanged(b.path, data.mtimeMs)) {
       const structure = detectStructure(b.path, data.whole_content)
       return appendSummary(state, b.path, "File changed outside editplus.", params.projectDir, { path: b.path, mtimeMs: data.mtimeMs, lines: data.lines, whole_content: data.whole_content, structure })
@@ -118,8 +120,8 @@ async function handleEdit(state, params) {
     const newLines = [...data.lines.slice(0, b.line), ...ins, ...data.lines.slice(e.line)]
     await state.io.write(b.path, newLines)
     
-    const upd = await state.io.read(b.path).catch(() => null)
-    if (upd) registry.noteMtime(b.path, upd.mtimeMs)
+    const updResult = await state.io.read(b.path).catch(() => null)
+    if (updResult?.ok) registry.noteMtime(b.path, updResult.value.mtimeMs)
 
     const ser = registry.edit(b.path, b.line, e.line, ins.length)
     const dispEnd = params.endExclusive != null ? params.endExclusive : registry.serialForLine(b.path, e.line)

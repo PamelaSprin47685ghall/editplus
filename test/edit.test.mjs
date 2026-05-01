@@ -75,9 +75,9 @@ describe("edit handler behavior", () => {
       handlers.edit({ begin: sB, endExclusive: sC, content: "ONE" }),
       handlers.edit({ begin: sC, endExclusive: sEnd, content: "TWO" }),
     ])
-    const content = await readFile(file, "utf8")
-    assert.ok(r1.ok || r2.ok)
-    assert.ok(content.includes("ONE") || content.includes("TWO"))
+    assert.equal(r1.ok, true)
+    assert.equal(r2.ok, true)
+    assert.equal(await readFile(file, "utf8"), "a\nONE\nTWO\n")
   })
 
   it("allows concurrent edits to different files", async () => {

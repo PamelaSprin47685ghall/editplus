@@ -26,7 +26,7 @@ export function withLock(path, fn, timeoutMs = 30000) {
 
 export async function read(path) {
   const [fileStat, content] = await Promise.all([stat(path), readFile(path, "utf8")])
-  return { mtimeMs: fileStat.mtimeMs, whole_content: content, lines: splitLines(content) }
+  return success({ mtimeMs: fileStat.mtimeMs, whole_content: content, lines: splitLines(content) })
 }
 
 export const write = (path, lines) => writeFile(path, lines.join(""), "utf8")

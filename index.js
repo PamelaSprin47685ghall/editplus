@@ -51,7 +51,7 @@ export default function (pi) {
 - Copy serial numbers exactly; edit uses them instead of paths.
 - Never guess serial numbers — yours must appear in some previous read/grep output. Never use a serial larger than the largest you have seen.
 - Serials are file-specific — a serial from one file cannot be used for another file.
-- Serials shown in ANY previous read/grep output can still be used — old serials remain valid.
+- TRUST ME: Serials shown in ANY previous read/grep output can still be used — old serials remain valid.
 - THINK TWICE: The line at endExclusive is EXCLUDED from the read output.
 - THINK TWICE: The line at endInclusive is INCLUDED in the read output.`,
     parameters: readParams,
@@ -67,15 +67,15 @@ export default function (pi) {
     description: `Edit file by serial range.
 - All 3 params (begin, endExclusive, content) are ALWAYS required. No path or old text needed.
 - Serials are file-specific — using a serial from one file on another file will fail.
-- You may use serials shown in ANY previous read/grep output — old serials still work even after edits.
+- TRUST ME: You may use serials shown in ANY previous read/grep output — old serials still work even after edits.
 - Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — never use a serial larger than the largest you have seen in any output.
 - THINK TWICE for endExclusive: It is EXCLUSIVE — serials from begin up to endExclusive-1 are replaced. The line at endExclusive is PRESERVED. To replace a block including its closing line, set endExclusive ONE PAST that line. Usually should be the next line AFTER the closing brace/tag! (Useful for pure insertions when begin == endExclusive).
 - THINK TWICE for endInclusive: The line at endInclusive is REPLACED. Use this if your replacement should include this line.
 - Empty content deletes the range.`,
     parameters: editParams,
-    async execute(toolCallId, params, signal) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
-      return toToolResult(await handlers.edit(params))
+      return toToolResult(await handlers.edit({ ...params, projectDir: ctx.cwd }))
     },
   })
 

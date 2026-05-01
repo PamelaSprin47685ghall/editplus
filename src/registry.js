@@ -4,6 +4,7 @@ export class LineRegistry {
   #states = new Map()
   #mtimes = new Map()
   #allocations = []
+  #minAllocatedSerial = 1
   #cleared = new Map()
 
   hasFile(path) { return this.#states.has(path) }
@@ -12,6 +13,10 @@ export class LineRegistry {
     this.#states.delete(path)
     this.#mtimes.delete(path)
     this.#cleared.set(path, this.#nextSerial)
+    if (this.#cleared.size > 5000) {
+      const key = this.#cleared.keys().next().value
+      if (key) this.#cleared.delete(key)
+    }
   }
 
   assign(path, line, count) {
@@ -101,12 +106,19 @@ export class LineRegistry {
   }
   #pushAlloc(x, count, path) {
     this.#allocations.push({ x, count, path })
-    if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
+    if (this.#allocations.length > 20000) {
+      this.#allocations = this.#allocations.slice(-10000)
+      this.#minAllocatedSerial = this.#allocations[0].x
+    }
   }
 
   resolve(serial) {
     const path = this.#getPathForSerial(serial)
     if (!path) return undefined
+
+    if (this.#minAllocatedSerial > 1 && serial < this.#minAllocatedSerial) {
+      return { expired: true, stale: true }
+    }
 
     const clearedAt = this.#cleared.get(path)
     if (clearedAt && serial < clearedAt) {
@@ -212,6 +224,7 @@ export class LineRegistry {
     this.#states.clear()
     this.#mtimes.clear()
     this.#allocations = []
+    this.#minAllocatedSerial = 1
     this.#cleared.clear()
   }
 }
