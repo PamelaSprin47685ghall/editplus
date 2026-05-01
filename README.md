@@ -36,6 +36,8 @@ Replace content in the half-open serial range `[begin, endExclusive)`.
 
 Both serials must resolve to the same file. If the file changed outside editplus after serials were issued, the edit is rejected — re-read first.
 
+Parallel edits on the same file are safe and encouraged — writes are serialized internally with correct line-position re-resolution, so concurrent edits never corrupt each other.
+
 ## Serial semantics
 
 | Operation | What happens |
