@@ -10,7 +10,7 @@ export function validateEditParams(params) {
 }
 
 export function resolveSerial(registry, serial, action = "use", role = "serial") {
-  const num = typeof serial === "string" && /[A-Z]/i.test(serial) ? alphaToNum(serial) : serial
+  const num = typeof serial === "string" ? (/[A-Z]/i.test(serial) ? alphaToNum(serial) : parseInt(serial, 10)) : serial
   const entry = registry.resolve(num)
   if (!entry) return { ok: false, error: `${role} ${serial} does not exist. Re-read the file and copy a current serial.` }
   if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${serial} was generated. Re-read the file before ${action}.`, path: entry.path }
@@ -22,13 +22,21 @@ export function formatSerialLines(serials, lines, from, to) {
   const selected = serials.slice(from, to)
   const labels = selected.map(numToAlpha)
   const width = Math.max(...labels.map(s => s.length), 1)
-  return labels.map((label, index) => `${label.padStart(width)}|${lines[from + index]}`).join("")
+  return labels.map((label, index) => {
+    let text = lines[from + index]
+    if (text && !text.endsWith("\n") && !text.endsWith("\r")) text += "\n"
+    return `${label.padStart(width)}|${text}`
+  }).join("")
 }
 
 export function formatSerialIndexes(serials, lines, indexes) {
   const labels = indexes.map(index => numToAlpha(serials[index]))
   const width = Math.max(...labels.map(s => s.length), 1)
-  return indexes.map((index, i) => `${labels[i].padStart(width)}|${lines[index]}`).join("")
+  return indexes.map((index, i) => {
+    let text = lines[index]
+    if (text && !text.endsWith("\n") && !text.endsWith("\r")) text += "\n"
+    return `${labels[i].padStart(width)}|${text}`
+  }).join("")
 }
 
 export function splitReplacement(content, fallbackEnding) {

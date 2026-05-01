@@ -22,7 +22,16 @@ export function validateBoundary(begin, end) {
 
 function serialRange(registry, params, path) {
   const begin = resolveSerial(registry, params.begin, "reading", "begin serial")
-  const end = params.endExclusive == null ? null : resolveSerial(registry, params.endExclusive, "reading", "endExclusive serial")
+  
+  let end = null
+  if (params.endInclusive != null) {
+    const endInc = resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial")
+    if (!endInc.ok) return endInc
+    end = { ok: true, value: { path: endInc.value.path, line: endInc.value.line + 1, serial: null } }
+  } else if (params.endExclusive != null) {
+    end = resolveSerial(registry, params.endExclusive, "reading", "endExclusive serial")
+  }
+  
   if (!begin.ok) return begin
   if (end && !end.ok) return end
   if (begin.value.path !== path || (end && end.value.path !== path)) return failure("Requested serial range does not belong to this path. Re-read the target file.")
