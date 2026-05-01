@@ -50,28 +50,52 @@ async function loadFile(state, path, cwd, options = {}) {
 async function handleRead(state, params) {
   if (!params.path) return failure("path is required. Provide a file path to read.")
 
-  const file = await loadFile(state, stripAt(params.path), params.projectDir, {
+  let file = await loadFile(state, stripAt(params.path), params.projectDir, {
     failOnExternalChange: params.begin != null,
     externalChangeMessage: "File changed outside editplus. Re-read the full file before reading a serial range.",
   })
-  if (!file.ok) return file
-  if (file.value.lines.length === 0) {
-    const serials = registry.getSerials(file.value.path, 0); const serial = serials[0]
-    return success(`${numToAlpha(serial)}|\n`)
+
+  let rangeError = null
+
+  if (!file.ok && file.error && file.error.includes("File changed outside editplus")) {
+    rangeError = file.error
+    file = await loadFile(state, stripAt(params.path), params.projectDir, { failOnExternalChange: false })
   }
 
-  const range = readRange(registry, params, file.value)
-  if (!range.ok) return range
+  if (!file.ok) return file
 
-  // Assign N+1 serials: N for real lines + 1 end sentinel (line = file length)
+  if (file.value.lines.length === 0) {
+    const serials = registry.getSerials(file.value.path, 0); const serial = serials[0]
+    const text = `${numToAlpha(serial)}|\n`
+    if (rangeError) return failure(`${rangeError}\n\n--- Auto-attached current file summary ---\n${text}`)
+    return success(text)
+  }
+
+  if (!rangeError) {
+    const range = readRange(registry, params, file.value)
+    if (range.ok) {
+      const serials = registry.getSerials(file.value.path, file.value.lines.length)
+      const lines = [...file.value.lines, ""]
+      const text = range.value.indexes
+        ? formatSerialIndexes(serials, lines, [...range.value.indexes, file.value.lines.length].sort((a, b) => a - b))
+        : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
+      return params.begin == null
+        ? success(`${range.value.heading}\n\n${text}\n\n${range.value.hint}`)
+        : success(text)
+    }
+    rangeError = range.error
+  }
+
+  const fallbackRange = readRange(registry, { path: params.path }, file.value)
   const serials = registry.getSerials(file.value.path, file.value.lines.length)
   const lines = [...file.value.lines, ""]
-  const text = range.value.indexes
-    ? formatSerialIndexes(serials, lines, [...range.value.indexes, file.value.lines.length].sort((a, b) => a - b))
-    : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
-  return params.begin == null
-    ? success(`${range.value.heading}\n\n${text}\n\n${range.value.hint}`)
-    : success(text)
+  const text = fallbackRange.value.indexes
+    ? formatSerialIndexes(serials, lines, [...fallbackRange.value.indexes, file.value.lines.length].sort((a, b) => a - b))
+    : formatSerialLines(serials, lines, fallbackRange.value.from, lines.length)
+  const fullRender = fallbackRange.value.indexes 
+    ? `${fallbackRange.value.heading}\n\n${text}\n\n${fallbackRange.value.hint}`
+    : text
+  return failure(`${rangeError}\n\n--- Auto-attached current file summary ---\n${fullRender}`)
 }
 
 async function handleEdit(state, params) {
