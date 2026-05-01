@@ -108,13 +108,25 @@ async function handleRead(state, params) {
 }
 
 async function handleEdit(state, params) {
-  params = { ...params, begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive }
+  params = { 
+    ...params, 
+    begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, 
+    endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive,
+    endInclusive: typeof params.endInclusive === "string" ? alphaToNum(params.endInclusive) : params.endInclusive
+  }
   
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
   const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
-  const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+  let end;
+  if (params.endInclusive != null) {
+    const endInc = resolveSerial(registry, params.endInclusive, "editing", "endInclusive serial")
+    if (!endInc.ok) return endInc.path ? appendSummary(state, endInc.path, endInc.error, params.projectDir) : endInc
+    end = { ok: true, value: { path: endInc.value.path, line: endInc.value.line + 1, serial: null } }
+  } else {
+    end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+  }
   
   if (!begin.ok) return begin.path ? appendSummary(state, begin.path, begin.error, params.projectDir) : begin
   if (!end.ok) return end.path ? appendSummary(state, end.path, end.error, params.projectDir) : end
@@ -136,13 +148,17 @@ async function handleEdit(state, params) {
     const updated = await state.io.read(begin.value.path).catch(() => null)
     if (updated) registry.noteMtime(begin.value.path, updated.mtimeMs)
 
+    const displayEndExclusive = params.endExclusive != null 
+      ? params.endExclusive 
+      : registry.serialForLine(begin.value.path, end.value.line);
+
     const newSerials = registry.edit(
       begin.value.path,
       begin.value.line,
       end.value.line,
       insertedLines.length,
     )
-    return success(formatEditResult(begin.value.path, params, newSerials))
+    return success(formatEditResult(begin.value.path, params, newSerials, displayEndExclusive))
   })
 }
 

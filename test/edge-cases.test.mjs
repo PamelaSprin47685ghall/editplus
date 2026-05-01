@@ -163,7 +163,7 @@ describe("text utils", () => {
 
   it("validateEditParams rejects missing params with distinct messages", () => {
     assert.match(validateEditParams({}).error, /begin is required/)
-    assert.match(validateEditParams({ begin: 1 }).error, /endExclusive is required/)
+    assert.match(validateEditParams({ begin: 1 }).error, /Either endExclusive or endInclusive is required/)
     assert.match(validateEditParams({ begin: 1, endExclusive: 2 }).error, /content is required/)
     assert.equal(validateEditParams({ begin: 1, endExclusive: 2, content: "x" }).ok, true)
   })
@@ -507,7 +507,7 @@ describe("read handlers", () => {
 describe("edit handlers", () => {
   it("rejects missing params", async () => {
     assert.match((await handlers.edit({})).error, /begin is required/)
-    assert.match((await handlers.edit({ begin: "A" })).error, /endExclusive is required/)
+    assert.match((await handlers.edit({ begin: "A" })).error, /Either endExclusive or endInclusive is required/)
     assert.match((await handlers.edit({ begin: "A", endExclusive: "B" })).error, /content is required/)
   })
 

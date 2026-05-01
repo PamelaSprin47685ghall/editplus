@@ -3,7 +3,8 @@ import { alphaToNum, numToAlpha } from "./alpha.js"
 
 export function validateEditParams(params) {
   if (params.begin == null) return failure("begin is required. Use a serial from read or grep.")
-  if (params.endExclusive == null) return failure("endExclusive is required. Use the serial where replacement should stop.")
+  if (params.endExclusive == null && params.endInclusive == null) return failure("Either endExclusive or endInclusive is required.")
+  if (params.endExclusive != null && params.endInclusive != null) return failure("Provide either endExclusive or endInclusive, not both.")
   if (params.content == null) return failure("content is required. Use an empty string to delete.")
   return success(null)
 }
@@ -55,9 +56,9 @@ export function stripAt(path) {
   return path.startsWith("@") ? path.slice(1) : path
 }
 
-export function formatEditResult(path, params, serials) {
+export function formatEditResult(path, params, serials, displayEndExclusive = params.endExclusive) {
   const serialText = serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""
-  return `Edited ${path} at [${numToAlpha(params.begin)}, ${numToAlpha(params.endExclusive)}).${serialText}`
+  return `Edited ${path} at [${numToAlpha(params.begin)}, ${numToAlpha(displayEndExclusive)}).${serialText}`
 }
 
 export function success(value) {

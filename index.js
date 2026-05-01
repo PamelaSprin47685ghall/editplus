@@ -19,7 +19,7 @@ const editParams = {
     endExclusive: { type: "string", description: "Exclusive end serial. Always required. May resolve to the same file line as begin for pure insertion." },
     content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range." },
   },
-  required: ["begin", "endExclusive", "content"],
+  required: ["begin", "content"],
 }
 
 const grepParams = {
