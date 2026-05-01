@@ -1,31 +1,24 @@
 import { readFile, stat, writeFile, readdir } from "node:fs/promises"
 import { resolve, join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { failure, success } from "./text.js"
+import { failure, success, splitLines } from "./text.js"
 
 const locks = new Map()
 
-export async function withLock(path, fn) {
-  while (locks.has(path)) await locks.get(path).catch(() => {})
-  const p = fn().finally(() => locks.get(path) === p && locks.delete(path))
-  locks.set(path, p)
+export function withLock(path, fn) {
+  const prev = locks.get(path) || Promise.resolve()
+  const p = prev.catch(() => {}).then(fn)
+  const next = p.catch(() => {})
+  locks.set(path, next)
+  next.finally(() => {
+    if (locks.get(path) === next) locks.delete(path)
+  })
   return p
 }
 
 export async function read(path) {
   const [fileStat, content] = await Promise.all([stat(path), readFile(path, "utf8")])
-  const lines = []
-  for (let i = 0, s = 0; i < content.length; i++) {
-    if (content[i] === "\n" || (content[i] === "\r" && content[i+1] !== "\n")) {
-      lines.push(content.slice(s, i + 1))
-      s = i + 1
-    } else if (content[i] === "\r" && content[i+1] === "\n") {
-      lines.push(content.slice(s, i + 2))
-      i++
-      s = i + 1
-    }
-    if (i === content.length - 1 && s < content.length) lines.push(content.slice(s))
-  }
+  return { mtimeMs: fileStat.mtimeMs, whole_content: content, lines: splitLines(content) }
   return { mtimeMs: fileStat.mtimeMs, whole_content: content, lines }
 }
 

@@ -1,3 +1,4 @@
+const SENTINEL = 0 // Index of { x: Infinity, z: Infinity } to mark the end of arrays
 export class LineRegistry {
   #nextSerial = 1
   #states = new Map()
@@ -17,7 +18,7 @@ export class LineRegistry {
     if (count <= 0) return []
     let state = this.#states.get(path)
     if (!state) {
-      state = { segs: [{ x: Infinity, z: Infinity }], byZ: [0], byX: [0] }
+      state = { segs: [{ x: Infinity, z: Infinity }], byZ: [SENTINEL], byX: [SENTINEL] }
       this.#states.set(path, state)
     }
 
@@ -28,14 +29,15 @@ export class LineRegistry {
     const seg = { x: start, z: line }
     state.segs.push(seg)
     this.#allocations.push({ x: start, count, path })
+    if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
 
     state.byX.push(newIdx)
     state.byX.sort((a, b) => state.segs[a].x - state.segs[b].x)
 
-    state.byZ = state.byZ.filter(idx => idx !== 0)
+    state.byZ = state.byZ.filter(idx => idx !== SENTINEL)
     state.byZ.push(newIdx)
     state.byZ.sort((a, b) => state.segs[a].z - state.segs[b].z)
-    state.byZ.push(0)
+    state.byZ.push(SENTINEL)
 
     return Array.from({ length: count }, (_, index) => start + index)
   }
@@ -167,12 +169,13 @@ export class LineRegistry {
       const newSeg = { x: start, z: lo }
       state.segs.push(newSeg)
       this.#allocations.push({ x: start, count: insertedLineCount, path })
+      if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
       activeSegs.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
       newSerials = Array.from({ length: insertedLineCount }, (_, i) => start + i)
     }
 
     state.byZ = activeSegs.slice().sort((a, b) => a.z - b.z).map(s => s.idx)
-    state.byZ.push(0)
+    state.byZ.push(SENTINEL)
 
     state.byX = activeSegs.slice().sort((a, b) => a.x - b.x).map(s => s.idx)
 

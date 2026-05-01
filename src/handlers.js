@@ -20,21 +20,22 @@ async function loadFile(state, path, cwd, failOnExt = false) {
   if (!data.ok && data.error) return data
   if (registry.mtimeChanged(file.value, data.mtimeMs)) {
     registry.removeFile(file.value)
-    if (failOnExt) return failure("File changed outside editplus. Re-read the full file before reading a serial range.")
+    if (failOnExt) return { ok: false, error: "File changed outside editplus. Re-read the full file before reading a serial range.", code: "EXTERNAL_CHANGE" }
   }
   registry.noteMtime(file.value, data.mtimeMs)
   return success({ path: file.value, ...data })
 }
 
 function renderFileSummary(fileValue, params = {}) {
-  const serials = registry.getSerials(fileValue.path, fileValue.lines.length)
-  if (!fileValue.lines.length) return `${numToAlpha(serials[0])}|\n`
+  if (!registry.hasFile(fileValue.path)) registry.assign(fileValue.path, 0, fileValue.lines.length + 1)
+  const getS = i => numToAlpha(registry.serialForLine(fileValue.path, i))
+  if (!fileValue.lines.length) return `${getS(0)}|\n`
   const range = readRange(registry, params, fileValue)
   if (!range.ok) return null
   const lines = [...fileValue.lines, ""]
   const text = range.value.indexes
-    ? formatSerialIndexes(serials, lines, [...range.value.indexes, fileValue.lines.length].sort((a, b) => a - b))
-    : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
+    ? formatSerialIndexes(getS, lines, [...range.value.indexes, fileValue.lines.length].sort((a, b) => a - b))
+    : formatSerialLines(getS, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
   return range.value.indexes ? `${range.value.heading}\n\n${text}\n\n${range.value.hint}` : text
 }
 
@@ -47,14 +48,23 @@ async function appendSummary(state, path, errorMsg, projectDir) {
 }
 
 async function handleRead(state, params) {
-  if (!params.path) return failure("path is required. Provide a file path to read.")
-  const rp = stripAt(params.path).startsWith("/") ? stripAt(params.path) : resolve(params.projectDir ?? process.cwd(), stripAt(params.path))
-  const fileStat = await stat(rp).catch(() => null)
-  if (fileStat?.isDirectory()) return success(`$ du -hxd1\n${await state.io.generateFileListing(rp)}\n`)
-
+  if (!params.path) {
+    const s = params.begin ?? params.endInclusive ?? params.endExclusive
+    if (s != null) {
+      const num = typeof s === "string" ? alphaToNum(s) : s
+      const res = registry.resolve(num)
+      if (res && res.path) params.path = res.path
+      else return failure("Invalid or expired serial number provided.")
+    } else {
+      params.path = "."
+    }
+  }
+  
   let file = await loadFile(state, stripAt(params.path), params.projectDir, params.begin != null)
+  if (!file.ok && file.isDirectory) return success(`$ du -hxd1\n${await state.io.generateFileListing(file.path)}\n`)
+
   let err = null
-  if (!file.ok && file.error?.includes("File changed")) {
+  if (!file.ok && file.code === "EXTERNAL_CHANGE") {
     err = file.error
     file = await loadFile(state, stripAt(params.path), params.projectDir)
   }
@@ -66,12 +76,15 @@ async function handleRead(state, params) {
   }
   return appendSummary(state, params.path, err, params.projectDir)
 }
-
 function resolveEditBounds(params, projectDir, state) {
   const b = resolveSerial(registry, params.begin, "editing", "begin serial")
-  let e = params.endInclusive != null 
-    ? (res => res.ok ? { ok: true, value: { path: res.value.path, line: res.value.line + 1 } } : res)(resolveSerial(registry, params.endInclusive, "editing", "endInclusive serial"))
-    : resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+  let e = null
+  if (params.endInclusive != null) {
+    const res = resolveSerial(registry, params.endInclusive, "editing", "endInclusive serial")
+    e = res.ok ? { ok: true, value: { path: res.value.path, line: res.value.line + 1 } } : res
+  } else {
+    e = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+  }
   
   if (!b.ok) return { err: b.path ? appendSummary(state, b.path, b.error, projectDir) : b }
   if (!e.ok) return { err: e.path ? appendSummary(state, e.path, e.error, projectDir) : e }
@@ -122,7 +135,8 @@ async function handleEdit(state, params) {
 }
 
 async function handleGrep(state, params) {
-  if (!params.path) return failure("path is required. Provide a file path or glob to search."); if (!params.pattern) return failure("pattern is required. Provide a JavaScript regular expression.")
+  if (!params.path) return failure("path is required. Provide a file path or glob to search.")
+  if (!params.pattern) return failure("pattern is required. Provide a JavaScript regular expression.")
   const matcher = compilePattern(params.pattern)
   if (!matcher.ok) return matcher
   const paths = await state.expand(stripAt(params.path), params.projectDir)
@@ -132,15 +146,23 @@ async function handleGrep(state, params) {
   for (const path of paths) {
     const file = await loadFile(state, path, params.projectDir)
     if (!file.ok) { if (paths.length === 1) return file; continue }
-    const matches = file.value.lines.flatMap((l, i) => { matcher.value.lastIndex = 0; return matcher.value.test(l) ? [i] : [] })
-    if (matches.length) results.push({ ...file.value, lines: [...file.value.lines, ""], matches, serials: registry.getSerials(file.value.path, file.value.lines.length), structure: detectStructure(file.value.path, file.value.whole_content) })
+    const matches = []
+    for (let i = 0; i < file.value.lines.length; i++) {
+      matcher.value.lastIndex = 0
+      if (matcher.value.test(file.value.lines[i])) matches.push(i)
+    }
+    if (matches.length) {
+      if (!registry.hasFile(file.value.path)) registry.assign(file.value.path, 0, file.value.lines.length + 1)
+      results.push({ ...file.value, lines: [...file.value.lines, ""], matches, structure: detectStructure(file.value.path, file.value.whole_content) })
+    }
   }
 
   if (!results.length) return success(`No matches for ${params.pattern}`)
   return success(results.map(r => {
+    const getS = i => numToAlpha(registry.serialForLine(r.path, i))
     const s = new Set([0, r.lines.length - 1, ...(r.structure || [])])
     r.matches.forEach(m => { s.add(m); if(m>0)s.add(m-1); if(m<r.lines.length-1)s.add(m+1) })
-    const sum = formatSerialIndexes(r.serials, r.lines, [...s].sort((a,b)=>a-b))
+    const sum = formatSerialIndexes(getS, r.lines, [...s].sort((a,b)=>a-b))
     
     const blocks = []
     r.matches.map(l => blockForLine(r.structure, l, r.lines.length)).sort((a,b)=>a[0]-b[0]).forEach(([f,t]) => {
@@ -149,7 +171,7 @@ async function handleGrep(state, params) {
       else blocks.push([f, t])
     })
     
-    const rb = blocks.map(([f, t]) => `## Match block ${f + 1}-${t}\n\n\`\`\`\n${formatSerialLines(r.serials, r.lines, f, t)}\n\`\`\``)
+    const rb = blocks.map(([f, t]) => `## Match block ${f + 1}-${t}\n\n\`\`\`\n${formatSerialLines(getS, r.lines, f, t)}\n\`\`\``)
     return paths.length === 1 ? [`# ${r.path}`, ...rb].join("\n\n") : [`# ${r.path}`, "## Summary", `\`\`\`\n${sum}\n\`\`\``, ...rb].join("\n\n")
   }).join("\n\n"))
 }

@@ -15,6 +15,7 @@ export function alphaToNum(s) {
     const code = c.charCodeAt(0)
     if (code >= 65 && code <= 90) res = res * 52 + code - 64
     else if (code >= 97 && code <= 122) res = res * 52 + code - 70
+    else return NaN
   }
   return res
 }
@@ -42,7 +43,13 @@ export function blockForLine(structure, line, total) {
 export function readRange(registry, params, file) {
   if (params.begin != null) {
     const begin = resolveSerial(registry, params.begin, "reading", "begin serial")
-    const end = params.endInclusive != null ? { ok: true, value: { path: resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial").value?.path, line: resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial").value?.line + 1 } } : params.endExclusive != null ? resolveSerial(registry, params.endExclusive, "reading", "endExclusive serial") : null
+    let end = null
+    if (params.endInclusive != null) {
+      const e = resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial")
+      end = e.ok ? { ok: true, value: { path: e.value.path, line: e.value.line + 1 } } : e
+    } else if (params.endExclusive != null) {
+      end = resolveSerial(registry, params.endExclusive, "reading", "endExclusive serial")
+    }
     
     if (!begin.ok) return begin
     if (end && !end.ok) return end
@@ -89,14 +96,15 @@ export function resolveSerial(registry, serial, action = "use", role = "serial")
   return success(entry)
 }
 
-export function formatSerialLines(serials, lines, from, to) {
-  const selected = serials.slice(from, to).map(numToAlpha)
+export function formatSerialLines(getSerial, lines, from, to) {
+  const selected = []
+  for (let i = from; i < to; i++) selected.push(getSerial(i))
   const width = Math.max(...selected.map(s => s.length), 1)
   return selected.map((lbl, i) => `${lbl.padStart(width)}|${lines[from + i]?.endsWith('\n') || lines[from + i]?.endsWith('\r') ? lines[from + i] : (lines[from + i] || '') + '\n'}`).join("")
 }
 
-export function formatSerialIndexes(serials, lines, indexes) {
-  const labels = indexes.map(i => numToAlpha(serials[i]))
+export function formatSerialIndexes(getSerial, lines, indexes) {
+  const labels = indexes.map(getSerial)
   const width = Math.max(...labels.map(s => s.length), 1)
   return indexes.map((idx, i) => `${labels[i].padStart(width)}|${lines[idx]?.endsWith('\n') || lines[idx]?.endsWith('\r') ? lines[idx] : (lines[idx] || '') + '\n'}`).join("")
 }
@@ -104,19 +112,7 @@ export function formatSerialIndexes(serials, lines, indexes) {
 export function splitReplacement(content, ending) {
   if (!content) return []
   const text = /[\n\r]$/.test(content) ? content : content + ending
-  const res = []
-  for (let i = 0, start = 0; i < text.length; i++) {
-    if (text[i] === "\n" || (text[i] === "\r" && text[i + 1] !== "\n")) {
-      res.push(text.slice(start, i + 1))
-      start = i + 1
-    } else if (text[i] === "\r" && text[i + 1] === "\n") {
-      res.push(text.slice(start, i + 2))
-      i++
-      start = i + 1
-    }
-    if (i === text.length - 1 && start < text.length) res.push(text.slice(start))
-  }
-  return res
+  return splitLines(text)
 }
 
 export const endingOf = line => line?.endsWith("\r\n") ? "\r\n" : line?.endsWith("\n") ? "\n" : line?.endsWith("\r") ? "\r" : ""
@@ -124,7 +120,7 @@ export const compilePattern = p => { try { const m = p.match(/^\/(.*)\/([a-z]*)$
 export const stripAt = p => p.startsWith("@") ? p.slice(1) : p
 export const formatEditResult = (path, p, serials, end = p.endExclusive) => `Edited ${path} at [${numToAlpha(p.begin)}, ${numToAlpha(end)}).${serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""}`
 export const success = value => ({ ok: true, value })
-export const failure = error => ({ ok: false, error })
+export const failure = (error, meta = {}) => ({ ok: false, error, ...meta })
 
 export function splitLines(text) {
   const res = []

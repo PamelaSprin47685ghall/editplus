@@ -16,9 +16,9 @@ const editParams = {
   type: "object",
   properties: {
     begin: { type: "string", description: "Inclusive start serial from read or grep. Always required." },
-    endExclusive: { type: "string", description: "(Recommended) THINK TWICE: The line at endExclusive is PRESERVED. Use this if you want to replace up to, but NOT including, this line. (Useful for pure insertions when begin == endExclusive)" },
+    endExclusive: { type: "string", description: "(Recommended) THINK TWICE: The line at endExclusive is PRESERVED. Use this if you want to replace up to, but NOT including, this line. Usually should be the next line AFTER the closing brace/tag! (Useful for pure insertions when begin == endExclusive)" },
     endInclusive: { type: "string", description: "THINK TWICE: The line at endInclusive is REPLACED. Use this if your replacement should include this line. Mutually exclusive with endExclusive." },
-    content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range. Must NOT include the closing brace/tag if you used endExclusive on it!" },
+    content: { type: "string", description: "Replacement text. Always required. Empty string deletes the range." },
   },
   required: ["begin", "content"],
 }

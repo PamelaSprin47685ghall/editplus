@@ -30,10 +30,10 @@ describe("read handler behavior", () => {
     assert.match(result.value, /([A-Z]+)\|\s*\n/)
   })
 
-  it("rejects missing path", async () => {
+  it("defaults missing path to .", async () => {
     const result = await handlers.read({})
-    assert.equal(result.ok, false)
-    assert.match(result.error, /path is required/)
+    assert.equal(result.ok, true)
+    assert.match(result.value, /\$ du -hxd1/)
   })
 
   it("rejects non-existent file", async () => {
