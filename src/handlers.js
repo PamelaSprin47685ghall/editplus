@@ -2,6 +2,9 @@ import * as realIO from "./io.js"
 import { alphaToNum, numToAlpha } from "./alpha.js"
 import { expandGlob, inspectPath } from "./pathing.js"
 import { readRange, validateBoundary } from "./ranges.js"
+import { generateFileListing } from "./directory.js"
+import { resolve } from "node:path"
+import { stat } from "node:fs/promises"
 import { registry } from "./registry.js"
 import { blockForLine, detectStructure } from "./structure.js"
 import {
@@ -69,6 +72,13 @@ async function appendSummary(state, path, errorMsg, projectDir) {
 
 async function handleRead(state, params) {
   if (!params.path) return failure("path is required. Provide a file path to read.")
+
+  const resolvedPath = stripAt(params.path).startsWith("/") ? stripAt(params.path) : resolve(params.projectDir ?? process.cwd(), stripAt(params.path))
+  const fileStat = await stat(resolvedPath).catch(() => null)
+  if (fileStat && fileStat.isDirectory()) {
+    const listing = await generateFileListing(resolvedPath)
+    return success(`$ du -hxd1\n${listing}\n`)
+  }
 
   let file = await loadFile(state, stripAt(params.path), params.projectDir, {
     failOnExternalChange: params.begin != null,

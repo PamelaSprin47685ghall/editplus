@@ -398,11 +398,11 @@ describe("read handlers", () => {
     assert.match(result.error, /does not exist/)
   })
 
-  it("rejects directory path", async () => {
+  it("reads directory path as pseudo du -hxd1", async () => {
     const { dir } = await fixture("hello\n")
     const result = await handlers.read({ path: dir })
-    assert.equal(result.ok, false)
-    assert.match(result.error, /not a regular file/)
+    assert.equal(result.ok, true)
+    assert.match(result.value, /du -hxd1/)
   })
 
   it("reads file with @ prefix", async () => {
