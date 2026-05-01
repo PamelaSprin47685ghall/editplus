@@ -5,7 +5,7 @@ const handlers = createHandlers()
 const readParams = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path to read." },
+    path: { type: "string", description: "File path or directory to read. If a directory is provided, returns a recursive size listing (pseudo du -hxd1)." },
     begin: { type: "string", description: "Inclusive serial from a previous read or grep output." },
     endExclusive: { type: "string", description: "Exclusive serial where the requested range stops." },
   },
@@ -41,9 +41,10 @@ export default function (pi) {
   pi.registerTool({
     name: "read",
     label: "read",
-    description: "Read a file and assign global serial numbers to every line. Use begin/endExclusive serials for exact ranges.",
+    description: "Read a file to get serial numbers, or read a directory to get a recursive size listing (pseudo du -hxd1).",
     promptGuidelines: [
       "Use read instead of cat, head, tail, or sed.",
+      "Pass a directory path to get a recursive file size listing.",
       "Copy serial numbers exactly; edit uses them instead of paths.",
       "Never guess serial numbers — yours must appear in some previous read/grep output. Never use a serial larger than the largest you have seen.",
       "Serials are file-specific — a serial from one file cannot be used for another file.",
