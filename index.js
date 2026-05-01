@@ -101,6 +101,7 @@ export default function (pi) {
 
 function toToolResult(result) {
   if (!result.ok) return textResult(result.error, true)
+  if (typeof result.value === "object" && result.value !== null && result.value.isDetailed) { return { content: [{ type: "text", text: truncate(result.value.text) }], details: result.value.details } }
   return textResult(truncate(String(result.value)))
 }
 

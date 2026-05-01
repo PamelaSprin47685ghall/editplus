@@ -158,7 +158,46 @@ async function handleEdit(state, params) {
       end.value.line,
       insertedLines.length,
     )
-    return success(formatEditResult(begin.value.path, params, newSerials, displayEndExclusive))
+    
+    const oldLines = data.lines.slice(begin.value.line, end.value.line)
+    const contextLines = 4
+    const startContext = Math.max(0, begin.value.line - contextLines)
+    const endContext = Math.min(data.lines.length, end.value.line + contextLines)
+    
+    const lineNumWidth = String(Math.max(data.lines.length, newLines.length)).length
+    const pad = n => String(n).padStart(lineNumWidth, " ")
+    const diffLines = []
+    if (startContext > 0) diffLines.push(` ${" ".repeat(lineNumWidth)} ...`)
+    
+    const stripNewline = s => s.replace(/\r?\n$/, "")
+    
+    for (let i = startContext; i < begin.value.line; i++) {
+      diffLines.push(` ${pad(i + 1)} ${stripNewline(data.lines[i])}`)
+    }
+    for (let i = 0; i < oldLines.length; i++) {
+      diffLines.push(`-${pad(begin.value.line + i + 1)} ${stripNewline(oldLines[i])}`)
+    }
+    for (let i = 0; i < insertedLines.length; i++) {
+      diffLines.push(`+${pad(begin.value.line + i + 1)} ${stripNewline(insertedLines[i])}`)
+    }
+    let newLineOffset = begin.value.line + insertedLines.length
+    for (let i = end.value.line; i < endContext; i++) {
+      diffLines.push(` ${pad(newLineOffset + 1)} ${stripNewline(data.lines[i])}`)
+      newLineOffset++
+    }
+    if (endContext < data.lines.length) diffLines.push(` ${" ".repeat(lineNumWidth)} ...`)
+    
+    const diff = diffLines.join("\n")
+    const firstChangedLine = begin.value.line + 1
+
+    return success({
+      isDetailed: true,
+      text: formatEditResult(begin.value.path, params, newSerials, displayEndExclusive),
+      details: {
+        diff,
+        firstChangedLine
+      }
+    })
   })
 }
 

@@ -71,7 +71,7 @@ describe("edit", () => {
 
     const insert = await handlers.edit({ begin, endExclusive: end, content: "x\ny" })
     assert.equal(insert.ok, true)
-    assert.match(insert.value, /New serials:/)
+    assert.match(insert.value.text || insert.value, /New serials:/)
     assert.equal(await readFile(file, "utf8"), "a\nx\ny\nb\nc\n")
 
     // Re-read after insert, then delete the inserted "y"
