@@ -789,3 +789,23 @@ describe("LineRegistry getSerials post-edit consistency", () => {
     assert.equal(serials.length, 6)
   })
 })
+
+  it("reports distinct external change error for old serials after state reset", async () => {
+    const { file } = await fixture("a\nb\nc\n")
+    const full1 = await handlers.read({ path: file })
+    const oldSerials = serialsOf(full1.value)
+
+    // Simulate external touch (mtime change without content change)
+    const now = new Date(Date.now() + 10_000)
+    await utimes(file, now, now)
+
+    // Read without range to trigger mtimeChanged -> removeFile -> new allocations
+    await handlers.read({ path: file })
+
+    // Attempt to use old serial
+    const result = await handlers.read({ path: file, begin: oldSerials[0], endExclusive: oldSerials[1] })
+
+    assert.equal(result.ok, false)
+    assert.match(result.error, /File changed outside editplus since begin serial/)
+    assert.doesNotMatch(result.error, /line was edited or deleted/)
+  })

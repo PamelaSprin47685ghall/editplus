@@ -3,12 +3,14 @@ export class LineRegistry {
   #states = new Map()
   #mtimes = new Map()
   #allocations = []
+  #cleared = new Map()
 
   hasFile(path) { return this.#states.has(path) }
 
   removeFile(path) {
     this.#states.delete(path)
     this.#mtimes.delete(path)
+    this.#cleared.set(path, this.#nextSerial)
   }
 
   assign(path, line, count) {
@@ -91,6 +93,11 @@ export class LineRegistry {
   resolve(serial) {
     const path = this.#getPathForSerial(serial)
     if (!path) return undefined
+
+    const clearedAt = this.#cleared.get(path)
+    if (clearedAt && serial < clearedAt) {
+      return { path, line: -1, stale: true, external: true }
+    }
 
     const state = this.#states.get(path)
     if (!state) return undefined
@@ -186,6 +193,7 @@ export class LineRegistry {
     this.#states.clear()
     this.#mtimes.clear()
     this.#allocations = []
+    this.#cleared.clear()
   }
 }
 
