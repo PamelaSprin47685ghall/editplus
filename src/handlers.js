@@ -3,9 +3,9 @@ import { registry } from "./registry.js"
 import { resolve } from "node:path"
 import { stat } from "node:fs/promises"
 import {
-  alphaToNum, numToAlpha, readRange, validateBoundary, blockForLine, detectStructure,
-  compilePattern, endingOf, failure, formatEditResult, formatSerialIndexes, formatSerialLines,
-  resolveSerial, splitReplacement, stripAt, success, validateEditParams, detailedSymbol
+  tagToNum, numToTag, readRange, validateBoundary, blockForLine, detectStructure,
+  compilePattern, endingOf, failure, formatEditResult, formatTagIndexes, formatTagLines,
+  resolveTag, splitReplacement, stripAt, success, validateEditParams, detailedSymbol
 } from "./text.js"
 
 export const createHandlers = (deps = {}) => {
@@ -21,7 +21,7 @@ async function loadFile(state, path, cwd, failOnExt = false) {
   const { mtimeMs, whole_content, lines } = result.value
   if (registry.mtimeChanged(file.value, mtimeMs)) {
     registry.removeFile(file.value)
-    if (failOnExt) return { ok: false, error: "File changed outside editplus. Re-read the full file before reading a serial range.", code: "EXTERNAL_CHANGE" }
+    if (failOnExt) return { ok: false, error: "File changed outside editplus. Re-read the full file before reading a tag range.", code: "EXTERNAL_CHANGE" }
   }
   registry.noteMtime(file.value, mtimeMs)
   return success({ path: file.value, mtimeMs, whole_content, lines })
@@ -30,14 +30,14 @@ async function loadFile(state, path, cwd, failOnExt = false) {
 function renderFileSummary(fileValue, params = {}) {
   if (!registry.hasFile(fileValue.path)) registry.assign(fileValue.path, 0, fileValue.lines.length + 1)
   const cursor = registry.createCursor(fileValue.path)
-  const getS = i => numToAlpha(cursor ? cursor.serialForLine(i) : registry.serialForLine(fileValue.path, i))
+  const getS = i => numToTag(cursor ? cursor.tagForLine(i) : registry.tagForLine(fileValue.path, i))
   if (!fileValue.lines.length) return `${getS(0)}|\n`
   const range = readRange(registry, params, fileValue)
   if (!range.ok) return null
   const lines = [...fileValue.lines, ""]
   const text = range.value.indexes
-    ? formatSerialIndexes(getS, lines, [...range.value.indexes, fileValue.lines.length].sort((a, b) => a - b))
-    : formatSerialLines(getS, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
+    ? formatTagIndexes(getS, lines, [...range.value.indexes, fileValue.lines.length])
+    : formatTagLines(getS, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
   return range.value.indexes ? `${range.value.heading}\n\n${text}\n\n${range.value.hint}` : text
 }
 
@@ -57,10 +57,10 @@ async function handleRead(state, params) {
   if (params.path == null) {
     const s = params.begin ?? params.endInclusive ?? params.endExclusive
     if (s != null) {
-      const num = typeof s === "string" ? alphaToNum(s) : s
+      const num = typeof s === "string" ? tagToNum(s) : s
       const res = registry.resolve(num)
       if (res && res.path) params.path = res.path
-      else return failure("Invalid or expired serial number provided.")
+      else return failure("Invalid or expired tag provided.")
     } else {
       params.path = "."
     }
@@ -84,13 +84,13 @@ async function handleRead(state, params) {
 }
 
 function resolveEditBounds(params, projectDir, state) {
-  const b = resolveSerial(registry, params.begin, "editing", "begin serial")
+  const b = resolveTag(registry, params.begin, "editing", "begin tag")
   let e = null
   if (params.endInclusive != null) {
-    const res = resolveSerial(registry, params.endInclusive, "editing", "endInclusive serial")
+    const res = resolveTag(registry, params.endInclusive, "editing", "endInclusive tag")
     e = res.ok ? { ok: true, value: { path: res.value.path, line: res.value.line + 1 } } : res
   } else {
-    e = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+    e = resolveTag(registry, params.endExclusive, "editing", "endExclusive tag")
   }
   
   if (!b.ok) return { err: b.path ? appendSummary(state, b.path, b.error, projectDir) : b }
@@ -101,15 +101,15 @@ function resolveEditBounds(params, projectDir, state) {
 }
 
 async function handleEdit(state, params) {
-  params = { ...params, begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive, endInclusive: typeof params.endInclusive === "string" ? alphaToNum(params.endInclusive) : params.endInclusive }
+  params = { ...params, begin: typeof params.begin === "string" ? tagToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? tagToNum(params.endExclusive) : params.endExclusive, endInclusive: typeof params.endInclusive === "string" ? tagToNum(params.endInclusive) : params.endInclusive }
   const val = validateEditParams(params)
   if (!val.ok) return val
 
-  // Resolve file path for lock key (serial→path is stable across concurrent edits)
+  // Resolve file path for lock key (tag→path is stable across concurrent edits)
   const pathEntry = registry.resolve(params.begin)
   if (!pathEntry || !pathEntry.path) {
     const bounds = resolveEditBounds(params, params.projectDir, state)
-    return bounds.err || failure("Edit failed: serial not found.")
+    return bounds.err || failure("Edit failed: tag not found.")
   }
 
   return state.io.withLock(pathEntry.path, async (signal) => {
@@ -133,8 +133,8 @@ async function handleEdit(state, params) {
     const updResult = await state.io.read(b.path).catch(() => null)
     if (updResult?.ok) registry.noteMtime(b.path, updResult.value.mtimeMs)
 
-    const ser = registry.edit(b.path, b.line, e.line, ins.length)
-    const dispEnd = params.endExclusive != null ? params.endExclusive : registry.serialForLine(b.path, e.line)
+    const tags = registry.edit(b.path, b.line, e.line, ins.length)
+    const dispEnd = params.endExclusive != null ? params.endExclusive : registry.tagForLine(b.path, e.line)
     
     const diffLines = []
     const w = String(Math.max(data.lines.length, newLines.length)).length
@@ -149,7 +149,7 @@ async function handleEdit(state, params) {
     for (let i = e.line, o = b.line + ins.length; i < ec; i++, o++) diffLines.push(` ${pad(o + 1)} ${strip(data.lines[i])}`)
     if (ec < data.lines.length) diffLines.push(` ${" ".repeat(w)} ...`)
 
-    return success({ [detailedSymbol]: true, text: formatEditResult(b.path, params, ser, dispEnd), details: { diff: diffLines.join("\n"), firstChangedLine: b.line + 1 } })
+    return success({ [detailedSymbol]: true, text: formatEditResult(b.path, params, tags, dispEnd), details: { diff: diffLines.join("\n"), firstChangedLine: b.line + 1 } })
   })
 }
 
@@ -184,19 +184,18 @@ async function handleGrep(state, params) {
   if (!results.length) return success(`No matches for ${params.pattern}`)
   return success(results.map(r => {
     const cursor = registry.createCursor(r.path)
-    const getS = i => numToAlpha(cursor ? cursor.serialForLine(i) : registry.serialForLine(r.path, i))
+    const getS = i => numToTag(cursor ? cursor.tagForLine(i) : registry.tagForLine(r.path, i))
     const s = new Set([0, r.lines.length - 1, ...(r.structure || [])])
     r.matches.forEach(m => { s.add(m); if(m>0)s.add(m-1); if(m<r.lines.length-1)s.add(m+1) })
-    const sum = formatSerialIndexes(getS, r.lines, [...s].sort((a,b)=>a-b))
+    const sum = formatTagIndexes(getS, r.lines, [...s].sort((a,b)=>a-b))
     
     const blocks = []
-    r.matches.map(l => blockForLine(r.structure, l, r.lines.length)).sort((a,b)=>a[0]-b[0]).forEach(([f,t]) => {
+    r.matches.map(l => blockForLine(r.structure, l, r.lines.length)).forEach(([f, t]) => {
       const last = blocks.at(-1)
       if (last && f <= last[1]) last[1] = Math.max(last[1], t)
       else blocks.push([f, t])
     })
-    
-    const rb = blocks.map(([f, t]) => `## Match block ${f + 1}-${t}\n\n\`\`\`\n${formatSerialLines(getS, r.lines, f, t)}\n\`\`\``)
+    const rb = blocks.map(([f, t]) => `## Match block ${f + 1}-${t}\n\n\`\`\`\n${formatTagLines(getS, r.lines, f, t)}\n\`\`\``)
     return paths.length === 1 ? [`# ${r.path}`, ...rb].join("\n\n") : [`# ${r.path}`, "## Summary", `\`\`\`\n${sum}\n\`\`\``, ...rb].join("\n\n")
   }).join("\n\n"))
 }

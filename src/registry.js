@@ -1,11 +1,11 @@
 const SENTINEL = 0 // Index of { x: Infinity, z: Infinity } to mark the end of arrays
 
-export class LineRegistry {
-  #nextSerial = 1
+export class TagRegistry {
+  #nextTag = 1
   #states = new Map()
   #mtimes = new Map()
   #allocations = []
-  #minAllocatedSerial = 1
+  #minAllocatedTag = 1
   #cleared = new Map()
 
   hasFile(path) { return this.#states.has(path) }
@@ -13,10 +13,10 @@ export class LineRegistry {
   removeFile(path) {
     this.#states.delete(path)
     this.#mtimes.delete(path)
-    this.#cleared.set(path, this.#nextSerial)
-    if (this.#cleared.size > 5000) {
+    this.#cleared.set(path, this.#nextTag)
+    if (this.#cleared.size > 100000) {
       const keys = [...this.#cleared.keys()]
-      for (let i = 0; i < Math.min(keys.length, 2500); i++)
+      for (let i = 0; i < Math.min(keys.length, 50000); i++)
         this.#cleared.delete(keys[i])
     }
   }
@@ -29,20 +29,32 @@ export class LineRegistry {
       this.#states.set(path, state)
     }
 
-    const start = this.#nextSerial
-    this.#nextSerial += count
+    const start = this.#nextTag
+    this.#nextTag += count
 
     const seg = { x: start, z: line, len: count }
-    state.zList.push(seg)
-    state.zList.sort((a, b) => a.z - b.z)
+
+    // xList 天然有序 — start 来自全局递增计数器，必定大于现存所有 x
     state.xList.push(seg)
-    state.xList.sort((a, b) => a.x - b.x)
+
+    // zList 线性插入 — 找到第一个 z 更大的段插入
+    let inserted = false
+    for (let i = 0; i < state.zList.length; i++) {
+      if (state.zList[i].z > seg.z) {
+        state.zList.splice(i, 0, seg)
+        inserted = true
+        break
+      }
+    }
+    if (!inserted) {
+      state.zList.push(seg)
+    }
 
     this.#pushAlloc(start, count, path)
     return Array.from({ length: count }, (_, index) => start + index)
   }
 
-  serialForLine(path, line) {
+  tagForLine(path, line) {
     const state = this.#states.get(path)
     if (!state || state.zList.length === 0) return undefined
 
@@ -65,19 +77,19 @@ export class LineRegistry {
   createCursor(path) {
     const state = this.#states.get(path)
     if (!state) return null
-    return new SerialCursor(state)
+    return new TagCursor(state)
   }
 
-  #getPathForSerial(serial) {
+  #getPathForTag(tag) {
     if (this.#allocations.length === 0) return undefined
     let low = 0
     let high = this.#allocations.length - 1
     while (low <= high) {
       const mid = (low + high) >> 1
       const alloc = this.#allocations[mid]
-      if (serial < alloc.x) {
+      if (tag < alloc.x) {
         high = mid - 1
-      } else if (serial >= alloc.x + alloc.count) {
+      } else if (tag >= alloc.x + alloc.count) {
         low = mid + 1
       } else {
         return alloc.path
@@ -88,22 +100,22 @@ export class LineRegistry {
 
   #pushAlloc(x, count, path) {
     this.#allocations.push({ x, count, path })
-    if (this.#allocations.length > 20000) {
-      this.#allocations = this.#allocations.slice(-10000)
-      this.#minAllocatedSerial = this.#allocations[0].x
+    if (this.#allocations.length > 1000000) {
+      this.#allocations = this.#allocations.slice(-500000)
+      this.#minAllocatedTag = this.#allocations[0].x
     }
   }
 
-  resolve(serial) {
-    const path = this.#getPathForSerial(serial)
+  resolve(tag) {
+    const path = this.#getPathForTag(tag)
     if (!path) return undefined
 
-    if (this.#minAllocatedSerial > 1 && serial < this.#minAllocatedSerial) {
+    if (this.#minAllocatedTag > 1 && tag < this.#minAllocatedTag) {
       return { expired: true, stale: true }
     }
 
     const clearedAt = this.#cleared.get(path)
-    if (clearedAt && serial < clearedAt) {
+    if (clearedAt && tag < clearedAt) {
       return { path, line: -1, stale: true, external: true }
     }
 
@@ -113,14 +125,14 @@ export class LineRegistry {
     const xList = state.xList
     let i = Math.min(state.lastX, xList.length - 1)
 
-    while (i > 0 && serial < xList[i].x) i--
-    while (i < xList.length - 1 && serial >= xList[i + 1].x) i++
+    while (i > 0 && tag < xList[i].x) i--
+    while (i < xList.length - 1 && tag >= xList[i + 1].x) i++
 
     state.lastX = i
     const seg = xList[i]
 
-    if (serial >= seg.x && serial < seg.x + seg.len) {
-      return { path, line: seg.z + (serial - seg.x), stale: false }
+    if (tag >= seg.x && tag < seg.x + seg.len) {
+      return { path, line: seg.z + (tag - seg.x), stale: false }
     }
 
     return { path, line: -1, stale: true }
@@ -164,14 +176,14 @@ export class LineRegistry {
       }
     }
 
-    let newSerials = []
+    let newTags = []
     let midSeg = null
     if (insertedLineCount > 0) {
-      const start = this.#nextSerial
-      this.#nextSerial += insertedLineCount
+      const start = this.#nextTag
+      this.#nextTag += insertedLineCount
       midSeg = { x: start, z: lo, len: insertedLineCount }
       this.#pushAlloc(start, insertedLineCount, path)
-      newSerials = Array.from({ length: insertedLineCount }, (_, i) => start + i)
+      newTags = Array.from({ length: insertedLineCount }, (_, i) => start + i)
     }
 
     state.zList = [...left]
@@ -189,8 +201,7 @@ export class LineRegistry {
       if (rightSeg) inserts.push(rightSeg)
     }
     if (midSeg) inserts.push(midSeg)
-    inserts.sort((a, b) => a.x - b.x)
-
+    // inserts 天然有序 — splits 来自 xList 遍历，midSeg 的 x 全局最大
     const merged = []
     let bi = 0, ii = 0
     while (bi < base.length && ii < inserts.length) {
@@ -200,29 +211,32 @@ export class LineRegistry {
     while (bi < base.length) merged.push(base[bi++])
     while (ii < inserts.length) merged.push(inserts[ii++])
     state.xList = merged
+    // Reset scan caches — zList/xList were rebuilt, cached indices are stale
+    state.lastZ = 0
+    state.lastX = 0
 
-    return newSerials
+    return newTags
   }
 
   noteMtime(path, mtimeMs) { this.#mtimes.set(path, mtimeMs) }
   mtimeChanged(path, mtimeMs) { return this.#mtimes.has(path) && Math.abs(this.#mtimes.get(path) - mtimeMs) > 100 }
 
   reset() {
-    this.#nextSerial = 1
+    this.#nextTag = 1
     this.#states.clear()
     this.#mtimes.clear()
     this.#allocations = []
-    this.#minAllocatedSerial = 1
+    this.#minAllocatedTag = 1
     this.#cleared.clear()
   }
 
-  // Exposed for serialForLine fallback in text.js — paths are stable
-  _getPathForSerial(serial) { return this.#getPathForSerial(serial) }
+  // Exposed for tagForLine fallback in text.js — paths are stable
+  _getPathForTag(tag) { return this.#getPathForTag(tag) }
 }
 
-export const registry = new LineRegistry()
+export const registry = new TagRegistry()
 
-export class SerialCursor {
+export class TagCursor {
   #zList
   #xList
   #zIndex = 0
@@ -233,7 +247,7 @@ export class SerialCursor {
     this.#xList = state.xList
   }
 
-  serialForLine(line) {
+  tagForLine(line) {
     if (this.#zList.length === 0) return undefined
 
     let i = Math.min(this.#zIndex, this.#zList.length - 1)

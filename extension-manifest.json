@@ -2,7 +2,7 @@
   "id": "editplus",
   "name": "editplus",
   "version": "0.1.0",
-  "description": "Serial-number-based read, edit, and grep tools. Supports safe parallel edits on the same file.",
+  "description": "Tag-based read, edit, and grep tools for AI-native code editing. Concurrency-safe parallel edits, structural code summaries, stale-change detection, and stable tag addressing across files. Powers reliable LLM code modification without fragile text matching.",
   "tier": "community",
   "requires": {
     "platform": ">=2.29.0"

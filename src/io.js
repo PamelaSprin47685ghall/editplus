@@ -57,7 +57,7 @@ export async function expandGlob(input, cwd, includeIgnored = false) {
     const { stdout } = await execFileAsync("git", [...args, "--", input], { cwd: cwd ?? process.cwd(), encoding: "utf8" })
     return [...new Set(stdout.split('\0').filter(Boolean))].sort()
   } catch (err) {
-    throw new Error("Git command failed.")
+    throw new Error(`Git command failed: ${err.stderr?.trim() || err.message}`)
   }
 }
 

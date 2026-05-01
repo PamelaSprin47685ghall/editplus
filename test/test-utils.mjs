@@ -25,7 +25,7 @@ export async function fixture(content, filename = "sample.js") {
   return { dir, file }
 }
 
-export function serialsOf(text) {
+export function tagsOf(text) {
   if (!text) return []
   return [...text.matchAll(/([A-Z]+)\|/g)].map(m => m[1])
 }

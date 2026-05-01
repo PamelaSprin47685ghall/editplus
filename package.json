@@ -1,7 +1,7 @@
 {
   "name": "editplus",
   "version": "0.1.0",
-  "description": "Serial-number-based file read/edit with global sequential line numbers (流水号), no file path needed in edit",
+  "description": "Tag-based file read, edit, and search tools for AI agents. Concurrency-safe parallel edits with stale detection, structural code summaries via tree-sitter, and stable cross-file tag addressing — no fragile text matching needed. First-class pi/GSD extension.",
   "type": "module",
   "main": "./index.js",
   "exports": "./index.js",

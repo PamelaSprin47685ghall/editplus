@@ -1,5 +1,23 @@
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, resolve } from "node:path"
 import { createHandlers } from "./src/handlers.js"
 import { detailedSymbol } from "./src/text.js"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+function loadPrompts() {
+  const md = readFileSync(resolve(__dirname, "prompts.md"), "utf8")
+  const sections = md.split(/\n(?=# )/)
+  const prompts = {}
+  for (const section of sections) {
+    const m = section.match(/^# (\w+)\n([\s\S]*)$/)
+    if (m) prompts[m[1]] = m[2].trim()
+  }
+  return prompts
+}
+
+const prompts = loadPrompts()
 
 const handlers = createHandlers()
 
@@ -7,9 +25,9 @@ const readParams = {
   type: "object",
   properties: {
     path: { type: "string", description: "File path or directory to read." },
-    begin: { type: "string", description: "Inclusive start serial." },
-    endExclusive: { type: "string", description: "Exclusive end serial. The line at this serial is omitted." },
-    endInclusive: { type: "string", description: "Inclusive end serial. Mutually exclusive with endExclusive." },
+    begin: { type: "string", description: "Inclusive start tag." },
+    endExclusive: { type: "string", description: "Exclusive end tag. The line at this tag is omitted." },
+    endInclusive: { type: "string", description: "Inclusive end tag. Mutually exclusive with endExclusive." },
   },
   required: [],
 }
@@ -17,9 +35,9 @@ const readParams = {
 const editParams = {
   type: "object",
   properties: {
-    begin: { type: "string", description: "Inclusive start serial." },
-    endExclusive: { type: "string", description: "Exclusive end serial. The line at this serial is preserved." },
-    endInclusive: { type: "string", description: "Inclusive end serial. Mutually exclusive with endExclusive." },
+    begin: { type: "string", description: "Inclusive start tag." },
+    endExclusive: { type: "string", description: "Exclusive end tag. The line at this tag is PRESERVED (not replaced). Only lines from begin up to endExclusive-1 are replaced. Use this to keep the end delimiter (closing brace/tag). Pure insertion when begin == endExclusive." },
+    endInclusive: { type: "string", description: "Inclusive end tag. This line IS REPLACED. Use this when you want the replacement to include the end line (closing brace/tag). WARNING: your content MUST include that closing line too, or it gets deleted!" },
     content: { type: "string", description: "Replacement text." },
   },
   required: ["begin", "content"],
@@ -45,15 +63,7 @@ export default function (pi) {
   pi.registerTool({
     name: "read",
     label: "read",
-    description: `Read a file to get serial numbers, or read a directory to get a recursive size listing (pseudo du -hxd1).
-- Use read instead of cat, head, tail, or sed.
-- Pass a directory path to get a recursive file size listing.
-- Copy serial numbers exactly; edit uses them instead of paths.
-- Never guess serial numbers — yours must appear in some previous read/grep output. Never use a serial larger than the largest you have seen.
-- Serials are file-specific — a serial from one file cannot be used for another file.
-- TRUST ME: Serials shown in ANY previous read/grep output can still be used — old serials remain valid.
-- THINK TWICE: The line at endExclusive is EXCLUDED from the read output.
-- THINK TWICE: The line at endInclusive is INCLUDED in the read output.`,
+    description: prompts.read,
     parameters: readParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
@@ -64,14 +74,7 @@ export default function (pi) {
   pi.registerTool({
     name: "edit",
     label: "edit",
-    description: `Edit file by serial range.
-- All 3 params (begin, endExclusive, content) are ALWAYS required. No path or old text needed.
-- Serials are file-specific — using a serial from one file on another file will fail.
-- TRUST ME: You may use serials shown in ANY previous read/grep output — old serials still work even after edits.
-- Never guess serial numbers; only use ones actually shown in read/grep output. Serials are NOT file line numbers — never use a serial larger than the largest you have seen in any output.
-- THINK TWICE for endExclusive: It is EXCLUSIVE — serials from begin up to endExclusive-1 are replaced. The line at endExclusive is PRESERVED. To replace a block including its closing line, set endExclusive ONE PAST that line. Usually should be the next line AFTER the closing brace/tag! (Useful for pure insertions when begin == endExclusive).
-- THINK TWICE for endInclusive: The line at endInclusive is REPLACED. Use this if your replacement should include this line.
-- Empty content deletes the range.`,
+    description: prompts.edit,
     parameters: editParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
@@ -82,14 +85,7 @@ export default function (pi) {
   pi.registerTool({
     name: "grep",
     label: "grep",
-    description: `Search files with a JavaScript regular expression and return serial-numbered matches that can be edited directly.
-- Use grep when you know a token or regex and need editable serials.
-- grep serials map to real files and can be passed directly to edit.
-- Path uses Git pathspec syntax (e.g., src, src/**/*.js) and respects .gitignore natively.
-- Use includeIgnored: true to bypass .gitignore.
-- Requires a Git repository.
-- Serials from grep output belong to the matched file only — do not use them on other files.
-- Serials from ANY previous grep remain valid; you do not need to re-read before editing.`,
+    description: prompts.grep,
     parameters: grepParams,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) return textResult("Cancelled")
