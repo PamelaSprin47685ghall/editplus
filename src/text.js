@@ -10,7 +10,10 @@ export function validateEditParams(params) {
 }
 
 export function resolveSerial(registry, serial, action = "use", role = "serial") {
-  const num = typeof serial === "string" ? (/[A-Z]/i.test(serial) ? alphaToNum(serial) : parseInt(serial, 10)) : serial
+  if (typeof serial === "string" && /^[0-9]+$/.test(serial.trim())) {
+    return { ok: false, error: `${role} "${serial}" is invalid. Raw numeric serials are not allowed. Use the alphabetic serials (e.g., A, BA) shown in the latest read/grep output.` }
+  }
+  const num = typeof serial === "string" ? alphaToNum(serial) : serial
   const entry = registry.resolve(num)
   if (!entry) return { ok: false, error: `${role} ${serial} does not exist. Re-read the file and copy a current serial.` }
   if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${serial} was generated. Re-read the file before ${action}.`, path: entry.path }

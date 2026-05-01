@@ -205,14 +205,15 @@ async function handleGrep(state, params) {
   if (!setup.ok) return setup
 
   const results = []
+  const isSingleFile = setup.value.paths.length === 1
   for (const path of setup.value.paths) {
     const result = await grepFile(state, path, params.projectDir, setup.value.matcher)
     if (result.ok && result.value) results.push(result.value)
-    if (!result.ok && setup.value.paths.length === 1) return result
+    if (!result.ok && isSingleFile) return result
   }
 
   if (results.length === 0) return success(`No matches for ${params.pattern}`)
-  return success(results.map(renderGrepFile).join("\n\n"))
+  return success(results.map(r => renderGrepFile(r, isSingleFile)).join("\n\n"))
 }
 
 async function prepareGrep(state, params) {
@@ -241,12 +242,17 @@ async function grepFile(state, path, cwd, matcher) {
   return success({ ...file.value, lines: [...file.value.lines, ""], matches, serials, structure: detectStructure(file.value.path, file.value.whole_content) })
 }
 
-function renderGrepFile(result) {
+function renderGrepFile(result, isSingleFile) {
   const { serials, lines, matches, structure } = result
   const indexes = buildSummaryIndexes(lines.length, matches, structure)
   const summary = formatSerialIndexes(serials, lines, indexes)
   const blocks = mergeBlocks(matches.map(line => blockForLine(structure, line, lines.length)))
   const renderedBlocks = blocks.map(([from, to]) => renderMatchBlock(result, from, to))
+  
+  if (isSingleFile) {
+    return [`# ${result.path}`, ...renderedBlocks].join("\n\n")
+  }
+  
   return [`# ${result.path}`, "## Summary", `\`\`\`\n${summary}\n\`\`\``, ...renderedBlocks].join("\n\n")
 }
 
