@@ -104,12 +104,19 @@ async function handleEdit(state, params) {
   params = { ...params, begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive, endInclusive: typeof params.endInclusive === "string" ? alphaToNum(params.endInclusive) : params.endInclusive }
   const val = validateEditParams(params)
   if (!val.ok) return val
-  
-  const bounds = resolveEditBounds(params, params.projectDir, state)
-  if (bounds.err) return bounds.err
-  const { b, e } = bounds
 
-  return state.io.withLock(b.path, async (signal) => {
+  // Resolve file path for lock key (serial→path is stable across concurrent edits)
+  const pathEntry = registry.resolve(params.begin)
+  if (!pathEntry || !pathEntry.path) {
+    const bounds = resolveEditBounds(params, params.projectDir, state)
+    return bounds.err || failure("Edit failed: serial not found.")
+  }
+
+  return state.io.withLock(pathEntry.path, async (signal) => {
+    // Resolve boundaries inside the lock — current registry state, race-safe
+    const bounds = resolveEditBounds(params, params.projectDir, state)
+    if (bounds.err) return bounds.err
+    const { b, e } = bounds
     const result = await state.io.read(b.path).catch(e => failure(`Failed to read: ${e.message}`))
     if (!result.ok) return result
     const data = result.value
