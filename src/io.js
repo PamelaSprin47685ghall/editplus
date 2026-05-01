@@ -8,12 +8,20 @@ const execFileAsync = promisify(execFile)
 
 const locks = new Map()
 
+const MAX_READ_SIZE = 50 * 1024 * 1024
+const DIR_SCAN_MAX_DEPTH = 10
+const DIR_SCAN_MAX_FILES = 10000
+
 export function withLock(path, fn, timeoutMs = 30000) {
   const prev = locks.get(path) || Promise.resolve()
   const p = prev.catch(() => {}).then(() => {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Lock timeout on ${path}`)), timeoutMs)
-      Promise.resolve().then(fn).then(resolve, reject).finally(() => clearTimeout(timer))
+      const ac = new AbortController()
+      const timer = setTimeout(() => {
+        ac.abort()
+        reject(new Error(`Lock timeout on ${path}`))
+      }, timeoutMs)
+      Promise.resolve().then(() => fn(ac.signal)).then(resolve, reject).finally(() => clearTimeout(timer))
     })
   })
   locks.set(path, p)
@@ -23,9 +31,12 @@ export function withLock(path, fn, timeoutMs = 30000) {
   return p
 }
 
-
 export async function read(path) {
-  const [fileStat, content] = await Promise.all([stat(path), readFile(path, "utf8")])
+  const fileStat = await stat(path)
+  if (fileStat.size > MAX_READ_SIZE) {
+    return failure(`File too large (${(fileStat.size / 1024 / 1024).toFixed(1)}MB). Maximum read size is ${MAX_READ_SIZE / 1024 / 1024}MB.`)
+  }
+  const content = await readFile(path, "utf8")
   return success({ mtimeMs: fileStat.mtimeMs, whole_content: content, lines: splitLines(content) })
 }
 
@@ -53,12 +64,12 @@ export async function expandGlob(input, cwd, includeIgnored = false) {
 const sizeStr = b => b >= 1e9 ? (b / 1e9).toFixed(1) + "G" : b >= 1e6 ? (b / 1e6).toFixed(1) + "M" : b >= 1024 ? (b / 1024).toFixed(1) + "K" : b + "B"
 
 async function dirSize(dir, depth = 0, state = { count: 0 }) {
-  if (depth > 10 || state.count > 10000) return 0
+  if (depth > DIR_SCAN_MAX_DEPTH || state.count > DIR_SCAN_MAX_FILES) return 0
   try {
     const items = await readdir(dir, { withFileTypes: true }).catch(() => [])
     let sum = 0
     for (const i of items) {
-      if (state.count > 10000) return sum
+      if (state.count > DIR_SCAN_MAX_FILES) return sum
       const fp = join(dir, i.name)
       state.count++
       const st = await stat(fp).catch(() => null)

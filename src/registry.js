@@ -1,4 +1,5 @@
 const SENTINEL = 0 // Index of { x: Infinity, z: Infinity } to mark the end of arrays
+
 export class LineRegistry {
   #nextSerial = 1
   #states = new Map()
@@ -14,8 +15,9 @@ export class LineRegistry {
     this.#mtimes.delete(path)
     this.#cleared.set(path, this.#nextSerial)
     if (this.#cleared.size > 5000) {
-      const key = this.#cleared.keys().next().value
-      if (key) this.#cleared.delete(key)
+      const keys = [...this.#cleared.keys()]
+      for (let i = 0; i < Math.min(keys.length, 2500); i++)
+        this.#cleared.delete(keys[i])
     }
   }
 
@@ -54,26 +56,6 @@ export class LineRegistry {
     return Array.from({ length: count }, (_, index) => start + index)
   }
 
-  getSerials(path, maxLine) {
-    if (!this.#states.has(path)) {
-      this.assign(path, 0, maxLine + 1)
-    }
-    const state = this.#states.get(path)
-    const serials = new Array(maxLine + 1)
-    let zIdx = 0
-    let nextZ = state.segs[state.byZ[zIdx + 1]].z
-
-    for (let L = 0; L <= maxLine; L++) {
-      while (L >= nextZ) {
-        zIdx++
-        nextZ = state.segs[state.byZ[zIdx + 1]].z
-      }
-      const seg = state.segs[state.byZ[zIdx]]
-      serials[L] = seg.x + (L - seg.z)
-    }
-    return serials
-  }
-
   serialForLine(path, line) {
     const state = this.#states.get(path)
     if (!state) return undefined
@@ -85,6 +67,12 @@ export class LineRegistry {
     }
     const seg = state.segs[state.byZ[zIdx]]
     return seg.x + (line - seg.z)
+  }
+
+  createCursor(path) {
+    const state = this.#states.get(path)
+    if (!state) return null
+    return new SerialCursor(state)
   }
 
   #getPathForSerial(serial) {
@@ -104,6 +92,7 @@ export class LineRegistry {
     }
     return undefined
   }
+
   #pushAlloc(x, count, path) {
     this.#allocations.push({ x, count, path })
     if (this.#allocations.length > 20000) {
@@ -211,13 +200,20 @@ export class LineRegistry {
       ...right.map(s => s.idx),
       ...mid.map(s => s.idx),
     ]
+    // byX must be sorted by seg.x ascending for resolve()'s linear scan.
+    // left segs keep their original x (lowest serial range).
+    // right segs: split ones get x = original.x + dropCount (middle range);
+    //             wholly-after segs keep their original x, which was already
+    //             above the edited range.
+    // mid segs get brand-new serials from #nextSerial (highest range).
+    // Therefore [left, right, mid] is naturally ordered by x.
 
     return newSerials
   }
 
   noteMtime(path, mtimeMs) { this.#mtimes.set(path, mtimeMs) }
 
-  mtimeChanged(path, mtimeMs) { return this.#mtimes.has(path) && this.#mtimes.get(path) !== mtimeMs }
+  mtimeChanged(path, mtimeMs) { return this.#mtimes.has(path) && Math.abs(this.#mtimes.get(path) - mtimeMs) > 100 }
 
   reset() {
     this.#nextSerial = 1
@@ -230,3 +226,22 @@ export class LineRegistry {
 }
 
 export const registry = new LineRegistry()
+
+export class SerialCursor {
+  #segs
+  #byZ
+  #zIdx = 0
+
+  constructor(state) {
+    this.#segs = state.segs
+    this.#byZ = state.byZ
+  }
+
+  serialForLine(line) {
+    let zIdx = this.#zIdx
+    while (zIdx < this.#byZ.length - 2 && line >= this.#segs[this.#byZ[zIdx + 1]].z) zIdx++
+    this.#zIdx = zIdx
+    const seg = this.#segs[this.#byZ[zIdx]]
+    return seg.x + (line - seg.z)
+  }
+}

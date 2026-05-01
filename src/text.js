@@ -100,17 +100,24 @@ export function resolveSerial(registry, serial, action = "use", role = "serial")
   return success(entry)
 }
 
+function formatSerial(getSerial, lines, indexes) {
+  const labels = indexes.map(getSerial)
+  const width = Math.max(...labels.map(s => s.length), 1)
+  return indexes.map((idx, i) => {
+    const line = lines[idx]
+    const suffix = line?.endsWith('\n') || line?.endsWith('\r') ? line : (line || '') + '\n'
+    return `${labels[i].padStart(width)}|${suffix}`
+  }).join("")
+}
+
 export function formatSerialLines(getSerial, lines, from, to) {
-  const selected = []
-  for (let i = from; i < to; i++) selected.push(getSerial(i))
-  const width = Math.max(...selected.map(s => s.length), 1)
-  return selected.map((lbl, i) => `${lbl.padStart(width)}|${lines[from + i]?.endsWith('\n') || lines[from + i]?.endsWith('\r') ? lines[from + i] : (lines[from + i] || '') + '\n'}`).join("")
+  const indexes = []
+  for (let i = from; i < to; i++) indexes.push(i)
+  return formatSerial(getSerial, lines, indexes)
 }
 
 export function formatSerialIndexes(getSerial, lines, indexes) {
-  const labels = indexes.map(getSerial)
-  const width = Math.max(...labels.map(s => s.length), 1)
-  return indexes.map((idx, i) => `${labels[i].padStart(width)}|${lines[idx]?.endsWith('\n') || lines[idx]?.endsWith('\r') ? lines[idx] : (lines[idx] || '') + '\n'}`).join("")
+  return formatSerial(getSerial, lines, indexes)
 }
 
 export function splitReplacement(content, ending) {

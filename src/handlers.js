@@ -29,7 +29,8 @@ async function loadFile(state, path, cwd, failOnExt = false) {
 
 function renderFileSummary(fileValue, params = {}) {
   if (!registry.hasFile(fileValue.path)) registry.assign(fileValue.path, 0, fileValue.lines.length + 1)
-  const getS = i => numToAlpha(registry.serialForLine(fileValue.path, i))
+  const cursor = registry.createCursor(fileValue.path)
+  const getS = i => numToAlpha(cursor ? cursor.serialForLine(i) : registry.serialForLine(fileValue.path, i))
   if (!fileValue.lines.length) return `${getS(0)}|\n`
   const range = readRange(registry, params, fileValue)
   if (!range.ok) return null
@@ -81,6 +82,7 @@ async function handleRead(state, params) {
   }
   return appendSummary(state, params.path, err, params.projectDir)
 }
+
 function resolveEditBounds(params, projectDir, state) {
   const b = resolveSerial(registry, params.begin, "editing", "begin serial")
   let e = null
@@ -107,7 +109,7 @@ async function handleEdit(state, params) {
   if (bounds.err) return bounds.err
   const { b, e } = bounds
 
-  return state.io.withLock(b.path, async () => {
+  return state.io.withLock(b.path, async (signal) => {
     const result = await state.io.read(b.path).catch(e => failure(`Failed to read: ${e.message}`))
     if (!result.ok) return result
     const data = result.value
@@ -116,6 +118,7 @@ async function handleEdit(state, params) {
       return appendSummary(state, b.path, "File changed outside editplus.", params.projectDir, { path: b.path, mtimeMs: data.mtimeMs, lines: data.lines, whole_content: data.whole_content, structure })
     }
 
+    if (signal?.aborted) return failure("Operation aborted due to lock timeout.")
     const ins = splitReplacement(params.content, endingOf(data.lines[b.line]) || "\n")
     const newLines = [...data.lines.slice(0, b.line), ...ins, ...data.lines.slice(e.line)]
     await state.io.write(b.path, newLines)
@@ -173,7 +176,8 @@ async function handleGrep(state, params) {
 
   if (!results.length) return success(`No matches for ${params.pattern}`)
   return success(results.map(r => {
-    const getS = i => numToAlpha(registry.serialForLine(r.path, i))
+    const cursor = registry.createCursor(r.path)
+    const getS = i => numToAlpha(cursor ? cursor.serialForLine(i) : registry.serialForLine(r.path, i))
     const s = new Set([0, r.lines.length - 1, ...(r.structure || [])])
     r.matches.forEach(m => { s.add(m); if(m>0)s.add(m-1); if(m<r.lines.length-1)s.add(m+1) })
     const sum = formatSerialIndexes(getS, r.lines, [...s].sort((a,b)=>a-b))
