@@ -25,7 +25,7 @@ const editParams = {
 const grepParams = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path or glob pattern to search." },
+    path: { type: "string", description: "File path, directory, or glob pattern to search." },
     pattern: { type: "string", description: "JavaScript regular expression pattern." },
   },
   required: ["path", "pattern"],
@@ -84,7 +84,7 @@ export default function (pi) {
     promptGuidelines: [
       "Use grep when you know a token or regex and need editable serials.",
       "grep serials map to real files and can be passed directly to edit.",
-      "Path may be a single file or glob.",
+      "Path may be a single file, a directory (searched recursively), or a glob.",
       "Serials from grep output belong to the matched file only — do not use them on other files.",
       "Serials from ANY previous grep remain valid; you do not need to re-read before editing.",
     ],
