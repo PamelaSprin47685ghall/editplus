@@ -1,0 +1,102 @@
+# byX 排序挑战
+
+## 背景
+
+editplus 是一个基于序列号（serial）的文件编辑系统。每个文件在被读取时，每一行都获得一个全局唯一的递增序列号。后续的编辑操作通过序列号来引用行，而不是行号或文件路径。
+
+序列号系统的核心组件是 `LineRegistry`（`src/registry.js`），它维护每个文件的多组段（segments）。每个段记录一个连续的序列号范围和对应的行号范围：
+
+```
+{ x: serialStart, z: lineStart }
+```
+
+`byX` 是按序列号（x）排序的段索引数组。`resolve(serial)` 方法通过扫描 `byX` 来找到序列号对应的段，然后算出行号。
+
+## 问题
+
+```js
+// edit() 函数中 byX 的构建
+state.byX = [
+  ...left.map(s => s.idx),   // 编辑范围之前的段
+  ...right.map(s => s.idx),  // 编辑范围之后的段
+  ...mid.map(s => s.idx),    // 本次编辑新插入的行
+]
+```
+
+这段代码假设 `[left, right, mid]` 天然按 x 有序。这个假设在**单次编辑**时成立，但在**多次编辑积累后**失效。
+
+### 为什么失效
+
+每次编辑会分裂段。被编辑范围覆盖的段会被分成：
+
+- left 部分：保留原始 x（最小）
+- right 部分：x = 原 x + dropCount（中等）
+- mid 部分：全新序列号，来自全局计数器（最大）
+
+在 z 序（行号顺序）中，段排列为：`[prev_left, prev_mid, prev_right]`。但在 x 序中：`[prev_left, prev_right, prev_mid]`。注意 mid 的 x 最大，但在 z 序中它排在中间。
+
+当下一次编辑把所有段都归入 `left` 时（即新编辑范围在所有段之后），left 按 z 序收集为 `[prev_left, prev_mid, prev_right]`，x 值为 `[小, 大, 中]`。
+
+`byX = [left, right, mid]` 此时变为 `[prev_left(x=小), prev_mid(x=大), prev_right(x=中)]` — **未排序**！
+
+```
+byZ (z序): prev_left | prev_mid | prev_right
+x 值:       small       LARGE      medium
+byX 需要:   small       medium     LARGE
+```
+
+### 后果
+
+`resolve(serial)` 线性扫描 `byX` 来定位段。当 `byX` 未排序时，它会找到错误的段，算出错误的行号，然后误判序列号为 stale（过期），拒绝合法编辑请求。
+
+## 修复
+
+```js
+state.byX = [
+  ...left.map(s => s.idx),
+  ...right.map(s => s.idx),
+  ...mid.map(s => s.idx),
+].sort((a, b) => state.segs[a].x - state.segs[b].x)
+```
+
+显式的 `.sort()` 保证 x 序不变式。
+
+## 挑战题目
+
+### 难度：★★★★☆
+
+你被要求**不要使用 .sort()，用一次遍历（one-pass）重建 byX 并保证 x 序**。
+
+### 约束
+
+1. 在一次 byZ 遍历中完成所有段的分类和排序
+2. 不能使用全局排序（`.sort()`、`Array.prototype.sort()`、或任何等价操作）
+3. 不能引入新的存储结构（如平衡树、优先队列）
+4. 必须正确处理所有段的状态：
+   - 全在编辑前（wholly before）→ 保留原索引
+   - 全在编辑后（wholly after）→ 创建新副本，z 偏移
+   - 跨越编辑范围（split）→ left 部分保留原索引，right 部分创建新段
+   - 插入行（mid）→ 创建新段，最高 x
+
+### 核心难点
+
+`byZ` 的遍历顺序是 z 序（行号），但 `byX` 需要 x 序（序列号）。在一次遍历中同时维护两个序，需要理解**z 序和 x 序在编辑后的分歧规律**。
+
+以下性质可能帮助你思考：
+
+1. `mid.x > right.x > left.x` 永远成立（mid 拿到的是 `#nextSerial`，大于所有已存在的序列号）
+2. mid 段不能被后续编辑分裂（因为它只覆盖插入的若干行，后续编辑要么在其前、要么在其后、要么覆盖删除它）
+3. `byZ = [prev_left, prev_mid, prev_right]` 的结构在每次编辑后都会保持
+
+### 考察要点
+
+- 对段分裂 / 合并的理解
+- 对多个有序序（z、x、mid/non-mid）的分析能力
+- 在遍历中建立多个不变量并维护它们的能力
+- 权衡：为什么最终选择了 `.sort()` 而不是 one-pass？
+
+### 参考文件
+
+- `src/registry.js` — `LineRegistry` 类
+- `src/registry.js` 的 `edit()` 方法
+- 猴子测试记录见 HINTS.md 和 commit a262a75
