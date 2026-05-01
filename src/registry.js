@@ -179,14 +179,9 @@ export class LineRegistry {
     return newSerials
   }
 
-  noteMtime(path, mtimeMs) {
-    this.#mtimes.set(path, mtimeMs)
-  }
+  noteMtime(path, mtimeMs) { this.#mtimes.set(path, mtimeMs) }
 
-  mtimeChanged(path, mtimeMs) {
-    const known = this.#mtimes.get(path)
-    return known !== undefined && known !== mtimeMs
-  }
+  mtimeChanged(path, mtimeMs) { return this.#mtimes.has(path) && this.#mtimes.get(path) !== mtimeMs }
 
   reset() {
     this.#nextSerial = 1

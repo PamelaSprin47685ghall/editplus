@@ -1,81 +1,143 @@
-import { splitLines } from "./io.js"
-import { alphaToNum, numToAlpha } from "./alpha.js"
+import languagePack from "@kreuzberg/tree-sitter-language-pack"
+
+export function numToAlpha(n) {
+  let res = ""
+  for (; n > 0; n = Math.floor((n - 1) / 52)) {
+    const off = (n - 1) % 52
+    res = String.fromCharCode(off < 26 ? 65 + off : 71 + off) + res
+  }
+  return res
+}
+
+export function alphaToNum(s) {
+  let res = 0
+  for (const c of s) {
+    const code = c.charCodeAt(0)
+    if (code >= 65 && code <= 90) res = res * 52 + code - 64
+    else if (code >= 97 && code <= 122) res = res * 52 + code - 70
+  }
+  return res
+}
+
+export function detectStructure(path, content) {
+  try {
+    const lang = languagePack.detectLanguageFromPath(path) ?? languagePack.detectLanguageFromContent(content)
+    if (!lang) return null
+    const res = languagePack.process(content, { language: lang })
+    const lines = res?.structure?.map(i => i.span?.startLine).filter(Number.isInteger)
+    return lines?.length ? [...new Set(lines)].sort((a, b) => a - b) : null
+  } catch { return null }
+}
+
+export function blockForLine(structure, line, total) {
+  if (!structure?.length) return [0, total]
+  let start = 0
+  for (const c of structure) {
+    if (c > line) break
+    start = c
+  }
+  return [start, structure.find(c => c > line) ?? total]
+}
+
+export function readRange(registry, params, file) {
+  if (params.begin != null) {
+    const begin = resolveSerial(registry, params.begin, "reading", "begin serial")
+    const end = params.endInclusive != null ? { ok: true, value: { path: resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial").value?.path, line: resolveSerial(registry, params.endInclusive, "reading", "endInclusive serial").value?.line + 1 } } : params.endExclusive != null ? resolveSerial(registry, params.endExclusive, "reading", "endExclusive serial") : null
+    
+    if (!begin.ok) return begin
+    if (end && !end.ok) return end
+    if (begin.value.path !== file.path || (end && end.value.path !== file.path)) return failure("Requested serial range does not belong to this path.")
+    if (end && end.value.line < begin.value.line) return failure("Serial range is reversed.")
+    
+    return success({ from: begin.value.line, to: end ? end.value.line : begin.value.line + 1, heading: "", hint: "" })
+  }
+
+  const struct = detectStructure(file.path, file.whole_content)
+  const shown = new Set([0, 1, 2, file.lines.length - 2, file.lines.length - 1])
+  if (struct) struct.forEach(l => shown.add(l))
+  
+  return success({
+    from: 0, to: file.lines.length,
+    indexes: (!struct?.length || file.lines.length <= 80) ? null : [...shown].filter(l => l >= 0 && l < file.lines.length).sort((a, b) => a - b),
+    heading: `Summary for ${file.path}`,
+    hint: struct?.length ? "This is a structural summary. Use begin/endExclusive serials to read an exact range." : "Use begin/endExclusive serials to read an exact range.",
+  })
+}
+
+export function validateBoundary(begin, end) {
+  if (begin.path !== end.path) return failure("Serial range spans multiple files.")
+  if (end.line < begin.line) return failure("Serial range is reversed.")
+  return success(null)
+}
 
 export function validateEditParams(params) {
-  if (params.begin == null) return failure("begin is required. Use a serial from read or grep.")
+  if (params.begin == null) return failure("begin is required.")
   if (params.endExclusive == null && params.endInclusive == null) return failure("Either endExclusive or endInclusive is required.")
   if (params.endExclusive != null && params.endInclusive != null) return failure("Provide either endExclusive or endInclusive, not both.")
-  if (params.content == null) return failure("content is required. Use an empty string to delete.")
+  if (params.content == null) return failure("content is required.")
   return success(null)
 }
 
 export function resolveSerial(registry, serial, action = "use", role = "serial") {
-  if (typeof serial === "string" && /^[0-9]+$/.test(serial.trim())) {
-    return { ok: false, error: `${role} "${serial}" is invalid. Raw numeric serials are not allowed. Use the alphabetic serials (e.g., A, BA) shown in the latest read/grep output.` }
-  }
+  if (typeof serial === "string" && /^[0-9]+$/.test(serial.trim())) return failure(`Raw numeric serials are not allowed.`)
   const num = typeof serial === "string" ? alphaToNum(serial) : serial
+  const disp = typeof serial === "string" ? serial : numToAlpha(serial)
   const entry = registry.resolve(num)
-  if (!entry) return { ok: false, error: `${role} ${serial} does not exist. Re-read the file and copy a current serial.` }
-  if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${serial} was generated. Re-read the file before ${action}.`, path: entry.path }
-  if (entry.stale) return { ok: false, error: `${role} ${serial} is stale (line was edited or deleted). Re-read the file before ${action}.`, path: entry.path }
+  if (!entry) return failure(`${role} ${serial} does not exist. Re-read the file and copy a current serial.`)
+  if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${disp} was generated. Re-read the file before ${action}.`, path: entry.path }
+  if (entry.stale) return { ok: false, error: `${role} ${disp} is stale (line was edited or deleted). Re-read the file before ${action}.`, path: entry.path }
   return success(entry)
 }
 
 export function formatSerialLines(serials, lines, from, to) {
-  const selected = serials.slice(from, to)
-  const labels = selected.map(numToAlpha)
-  const width = Math.max(...labels.map(s => s.length), 1)
-  return labels.map((label, index) => {
-    let text = lines[from + index]
-    if (text && !text.endsWith("\n") && !text.endsWith("\r")) text += "\n"
-    return `${label.padStart(width)}|${text}`
-  }).join("")
+  const selected = serials.slice(from, to).map(numToAlpha)
+  const width = Math.max(...selected.map(s => s.length), 1)
+  return selected.map((lbl, i) => `${lbl.padStart(width)}|${lines[from + i]?.endsWith('\n') || lines[from + i]?.endsWith('\r') ? lines[from + i] : (lines[from + i] || '') + '\n'}`).join("")
 }
 
 export function formatSerialIndexes(serials, lines, indexes) {
-  const labels = indexes.map(index => numToAlpha(serials[index]))
+  const labels = indexes.map(i => numToAlpha(serials[i]))
   const width = Math.max(...labels.map(s => s.length), 1)
-  return indexes.map((index, i) => {
-    let text = lines[index]
-    if (text && !text.endsWith("\n") && !text.endsWith("\r")) text += "\n"
-    return `${labels[i].padStart(width)}|${text}`
-  }).join("")
+  return indexes.map((idx, i) => `${labels[i].padStart(width)}|${lines[idx]?.endsWith('\n') || lines[idx]?.endsWith('\r') ? lines[idx] : (lines[idx] || '') + '\n'}`).join("")
 }
 
-export function splitReplacement(content, fallbackEnding) {
-  if (content === "") return []
-  return splitLines(/[\n\r]$/.test(content) ? content : content + fallbackEnding)
-}
-
-export function endingOf(line = "") {
-  if (line.endsWith("\r\n")) return "\r\n"
-  if (line.endsWith("\n")) return "\n"
-  if (line.endsWith("\r")) return "\r"
-  return ""
-}
-
-export function compilePattern(pattern) {
-  const slashPattern = pattern.match(/^\/(.*)\/([dgimsuvy]*)$/)
-  try {
-    return success(slashPattern ? new RegExp(slashPattern[1], slashPattern[2]) : new RegExp(pattern))
-  } catch (error) {
-    return failure(`Invalid regular expression: ${error.message}. Fix pattern and grep again.`)
+export function splitReplacement(content, ending) {
+  if (!content) return []
+  const text = /[\n\r]$/.test(content) ? content : content + ending
+  const res = []
+  for (let i = 0, start = 0; i < text.length; i++) {
+    if (text[i] === "\n" || (text[i] === "\r" && text[i + 1] !== "\n")) {
+      res.push(text.slice(start, i + 1))
+      start = i + 1
+    } else if (text[i] === "\r" && text[i + 1] === "\n") {
+      res.push(text.slice(start, i + 2))
+      i++
+      start = i + 1
+    }
+    if (i === text.length - 1 && start < text.length) res.push(text.slice(start))
   }
+  return res
 }
 
-export function stripAt(path) {
-  return path.startsWith("@") ? path.slice(1) : path
-}
+export const endingOf = line => line?.endsWith("\r\n") ? "\r\n" : line?.endsWith("\n") ? "\n" : line?.endsWith("\r") ? "\r" : ""
+export const compilePattern = p => { try { const m = p.match(/^\/(.*)\/([a-z]*)$/); return success(m ? new RegExp(m[1], m[2]) : new RegExp(p)) } catch(e) { return failure(`Invalid regular expression: ${e.message}. Fix pattern and grep again.`) } }
+export const stripAt = p => p.startsWith("@") ? p.slice(1) : p
+export const formatEditResult = (path, p, serials, end = p.endExclusive) => `Edited ${path} at [${numToAlpha(p.begin)}, ${numToAlpha(end)}).${serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""}`
+export const success = value => ({ ok: true, value })
+export const failure = error => ({ ok: false, error })
 
-export function formatEditResult(path, params, serials, displayEndExclusive = params.endExclusive) {
-  const serialText = serials.length ? ` New serials: ${serials.map(numToAlpha).join(", ")}.` : ""
-  return `Edited ${path} at [${numToAlpha(params.begin)}, ${numToAlpha(displayEndExclusive)}).${serialText}`
-}
-
-export function success(value) {
-  return { ok: true, value }
-}
-
-export function failure(error) {
-  return { ok: false, error }
+export function splitLines(text) {
+  const res = []
+  for (let i = 0, start = 0; i < text.length; i++) {
+    if (text[i] === "\n" || (text[i] === "\r" && text[i + 1] !== "\n")) {
+      res.push(text.slice(start, i + 1))
+      start = i + 1
+    } else if (text[i] === "\r" && text[i + 1] === "\n") {
+      res.push(text.slice(start, i + 2))
+      i++
+      start = i + 1
+    }
+    if (i === text.length - 1 && start < text.length) res.push(text.slice(start))
+  }
+  return res
 }
