@@ -199,14 +199,12 @@ export class LineRegistry {
       ...left.map(s => s.idx),
       ...right.map(s => s.idx),
       ...mid.map(s => s.idx),
-    ]
+    ].sort((a, b) => state.segs[a].x - state.segs[b].x)
     // byX must be sorted by seg.x ascending for resolve()'s linear scan.
-    // left segs keep their original x (lowest serial range).
-    // right segs: split ones get x = original.x + dropCount (middle range);
-    //             wholly-after segs keep their original x, which was already
-    //             above the edited range.
-    // mid segs get brand-new serials from #nextSerial (highest range).
-    // Therefore [left, right, mid] is naturally ordered by x.
+    // left segs keep original x, right segs get shifted x (original + dropCount),
+    // mid segs get brand-new serials. But across multiple edits, left segs from
+    // different z-ranges can have larger x than right/mid segs.
+    // Explicit sort guarantees the ordering invariant.
 
     return newSerials
   }
