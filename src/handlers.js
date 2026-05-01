@@ -47,6 +47,26 @@ async function loadFile(state, path, cwd, options = {}) {
   return success({ path: file.value, ...data })
 }
 
+async function appendSummary(state, path, errorMsg, projectDir) {
+  if (!path) return failure(errorMsg)
+  const file = await loadFile(state, stripAt(path), projectDir, { failOnExternalChange: false })
+  if (!file.ok) return failure(errorMsg)
+  if (file.value.lines.length === 0) {
+    const serials = registry.getSerials(file.value.path, 0)
+    return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${numToAlpha(serials[0])}|\n`)
+  }
+  const fallbackRange = readRange(registry, { path }, file.value)
+  const serials = registry.getSerials(file.value.path, file.value.lines.length)
+  const lines = [...file.value.lines, ""]
+  const text = fallbackRange.value.indexes
+    ? formatSerialIndexes(serials, lines, [...fallbackRange.value.indexes, file.value.lines.length].sort((a, b) => a - b))
+    : formatSerialLines(serials, lines, fallbackRange.value.from, lines.length)
+  const fullRender = fallbackRange.value.indexes
+    ? `${fallbackRange.value.heading}\n\n${text}\n\n${fallbackRange.value.hint}`
+    : text
+  return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${fullRender}`)
+}
+
 async function handleRead(state, params) {
   if (!params.path) return failure("path is required. Provide a file path to read.")
 
@@ -86,16 +106,7 @@ async function handleRead(state, params) {
     rangeError = range.error
   }
 
-  const fallbackRange = readRange(registry, { path: params.path }, file.value)
-  const serials = registry.getSerials(file.value.path, file.value.lines.length)
-  const lines = [...file.value.lines, ""]
-  const text = fallbackRange.value.indexes
-    ? formatSerialIndexes(serials, lines, [...fallbackRange.value.indexes, file.value.lines.length].sort((a, b) => a - b))
-    : formatSerialLines(serials, lines, fallbackRange.value.from, lines.length)
-  const fullRender = fallbackRange.value.indexes 
-    ? `${fallbackRange.value.heading}\n\n${text}\n\n${fallbackRange.value.hint}`
-    : text
-  return failure(`${rangeError}\n\n--- Auto-attached current file summary ---\n${fullRender}`)
+  return appendSummary(state, params.path, rangeError, params.projectDir)
 }
 
 async function handleEdit(state, params) {
@@ -105,15 +116,19 @@ async function handleEdit(state, params) {
 
   const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
   const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
-  if (!begin.ok) return begin
-  if (!end.ok) return end
+  if (!begin.ok) return begin.path ? appendSummary(state, begin.path, begin.error, params.projectDir) : begin
+  if (!end.ok) return end.path ? appendSummary(state, end.path, end.error, params.projectDir) : end
   const boundary = validateBoundary(begin.value, end.value)
-  if (!boundary.ok) return boundary
+  if (!boundary.ok) return appendSummary(state, begin.value.path, boundary.error, params.projectDir)
 
   return state.io.withLock(begin.value.path, async () => {
     const prepared = await prepareEdit(state, params)
-    if (!prepared.ok) return prepared
-
+    if (!prepared.ok) {
+      if (prepared.error && prepared.error.includes("File changed outside editplus")) {
+        return appendSummary(state, begin.value.path, prepared.error, params.projectDir)
+      }
+      return prepared
+    }
     await state.io.write(prepared.value.path, prepared.value.lines)
     const updated = await state.io.read(prepared.value.path)
       .catch(() => null)

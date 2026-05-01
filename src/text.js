@@ -11,9 +11,9 @@ export function validateEditParams(params) {
 export function resolveSerial(registry, serial, action = "use", role = "serial") {
   const num = typeof serial === "string" && /[A-Z]/i.test(serial) ? alphaToNum(serial) : serial
   const entry = registry.resolve(num)
-  if (!entry) return failure(`${role} ${serial} does not exist. Re-read the file and copy a current serial.`)
-  if (entry.external) return failure(`File changed outside editplus since ${role} ${serial} was generated. Re-read the file before ${action}.`)
-  if (entry.stale) return failure(`${role} ${serial} is stale (line was edited or deleted). Re-read the file before ${action}.`)
+  if (!entry) return { ok: false, error: `${role} ${serial} does not exist. Re-read the file and copy a current serial.` }
+  if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${serial} was generated. Re-read the file before ${action}.`, path: entry.path }
+  if (entry.stale) return { ok: false, error: `${role} ${serial} is stale (line was edited or deleted). Re-read the file before ${action}.`, path: entry.path }
   return success(entry)
 }
 
