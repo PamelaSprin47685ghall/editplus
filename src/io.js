@@ -1,25 +1,32 @@
 import { readFile, stat, writeFile, readdir } from "node:fs/promises"
 import { resolve, join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { failure, success, splitLines } from "./text.js"
+
+const execFileAsync = promisify(execFile)
 
 const locks = new Map()
 
-export function withLock(path, fn) {
+export function withLock(path, fn, timeoutMs = 30000) {
   const prev = locks.get(path) || Promise.resolve()
-  const p = prev.catch(() => {}).then(fn)
-  const next = p.catch(() => {})
-  locks.set(path, next)
-  next.finally(() => {
-    if (locks.get(path) === next) locks.delete(path)
+  const p = prev.catch(() => {}).then(() => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Lock timeout on ${path}`)), timeoutMs)
+      Promise.resolve().then(fn).then(resolve, reject).finally(() => clearTimeout(timer))
+    })
+  })
+  locks.set(path, p)
+  p.finally(() => {
+    if (locks.get(path) === p) locks.delete(path)
   })
   return p
 }
 
+
 export async function read(path) {
   const [fileStat, content] = await Promise.all([stat(path), readFile(path, "utf8")])
   return { mtimeMs: fileStat.mtimeMs, whole_content: content, lines: splitLines(content) }
-  return { mtimeMs: fileStat.mtimeMs, whole_content: content, lines }
 }
 
 export const write = (path, lines) => writeFile(path, lines.join(""), "utf8")
@@ -35,9 +42,12 @@ export async function inspectPath(input, cwd) {
 export async function expandGlob(input, cwd, includeIgnored = false) {
   const args = ["ls-files", "-z", "--cached", "--others"]
   if (!includeIgnored) args.push("--exclude-standard")
-  const res = spawnSync("git", [...args, "--", input], { cwd: cwd ?? process.cwd(), encoding: "utf8" })
-  if (res.error || res.status !== 0) throw new Error("Git command failed.")
-  return [...new Set(res.stdout.split('\0').filter(Boolean))].sort()
+  try {
+    const { stdout } = await execFileAsync("git", [...args, "--", input], { cwd: cwd ?? process.cwd(), encoding: "utf8" })
+    return [...new Set(stdout.split('\0').filter(Boolean))].sort()
+  } catch (err) {
+    throw new Error("Git command failed.")
+  }
 }
 
 const sizeStr = b => b >= 1e9 ? (b / 1e9).toFixed(1) + "G" : b >= 1e6 ? (b / 1e6).toFixed(1) + "M" : b >= 1024 ? (b / 1024).toFixed(1) + "K" : b + "B"

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Serial-number-based file read/edit with global sequential line numbers (流水号), no file path needed in edit",
   "type": "module",
+  "main": "./index.js",
   "exports": "./index.js",
   "scripts": {
     "test": "node --test test/*.test.mjs"

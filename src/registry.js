@@ -31,13 +31,21 @@ export class LineRegistry {
     this.#allocations.push({ x: start, count, path })
     if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
 
-    state.byX.push(newIdx)
-    state.byX.sort((a, b) => state.segs[a].x - state.segs[b].x)
+    state.byX = [...state.byX.filter(idx => idx !== SENTINEL), newIdx, SENTINEL]
 
-    state.byZ = state.byZ.filter(idx => idx !== SENTINEL)
-    state.byZ.push(newIdx)
-    state.byZ.sort((a, b) => state.segs[a].z - state.segs[b].z)
-    state.byZ.push(SENTINEL)
+    const newByZ = []
+    let inserted = false
+    for (const idx of state.byZ) {
+      if (idx === SENTINEL) continue
+      if (!inserted && state.segs[idx].z > seg.z) {
+        newByZ.push(newIdx)
+        inserted = true
+      }
+      newByZ.push(idx)
+    }
+    if (!inserted) newByZ.push(newIdx)
+    newByZ.push(SENTINEL)
+    state.byZ = newByZ
 
     return Array.from({ length: count }, (_, index) => start + index)
   }
@@ -130,7 +138,8 @@ export class LineRegistry {
     if (!state) return []
 
     const delta = insertedLineCount - (hi - lo)
-    const activeSegs = []
+    const left = []
+    const right = []
 
     for (let j = 0; j < state.byZ.length - 1; j++) {
       const idx = state.byZ[j]
@@ -139,30 +148,31 @@ export class LineRegistry {
       const count = nextZ - seg.z
 
       if (seg.z + count <= lo) {
-        activeSegs.push({ idx, x: seg.x, z: seg.z })
+        left.push({ idx, x: seg.x, z: seg.z })
         continue
       }
 
       if (seg.z >= hi) {
         const newSeg = { x: seg.x, z: seg.z + delta }
         state.segs.push(newSeg)
-        activeSegs.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
+        right.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
         continue
       }
 
       if (seg.z < lo) {
-        activeSegs.push({ idx, x: seg.x, z: seg.z })
+        left.push({ idx, x: seg.x, z: seg.z })
       }
 
       if (seg.z + count > hi) {
         const dropCount = hi - seg.z
         const newSeg = { x: seg.x + dropCount, z: hi + delta }
         state.segs.push(newSeg)
-        activeSegs.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
+        right.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
       }
     }
 
     let newSerials = []
+    const mid = []
     if (insertedLineCount > 0) {
       const start = this.#nextSerial
       this.#nextSerial += insertedLineCount
@@ -170,14 +180,22 @@ export class LineRegistry {
       state.segs.push(newSeg)
       this.#allocations.push({ x: start, count: insertedLineCount, path })
       if (this.#allocations.length > 20000) this.#allocations = this.#allocations.slice(-10000)
-      activeSegs.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
+      mid.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
       newSerials = Array.from({ length: insertedLineCount }, (_, i) => start + i)
     }
 
-    state.byZ = activeSegs.slice().sort((a, b) => a.z - b.z).map(s => s.idx)
-    state.byZ.push(SENTINEL)
+    state.byZ = [
+      ...left.map(s => s.idx),
+      ...mid.map(s => s.idx),
+      ...right.map(s => s.idx),
+      SENTINEL,
+    ]
 
-    state.byX = activeSegs.slice().sort((a, b) => a.x - b.x).map(s => s.idx)
+    state.byX = [
+      ...left.map(s => s.idx),
+      ...right.map(s => s.idx),
+      ...mid.map(s => s.idx),
+    ]
 
     return newSerials
   }

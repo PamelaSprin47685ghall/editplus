@@ -39,11 +39,15 @@ function renderFileSummary(fileValue, params = {}) {
   return range.value.indexes ? `${range.value.heading}\n\n${text}\n\n${range.value.hint}` : text
 }
 
-async function appendSummary(state, path, errorMsg, projectDir) {
+async function appendSummary(state, path, errorMsg, projectDir, preloadedFileValue = null) {
   if (!path) return failure(errorMsg)
-  const file = await loadFile(state, stripAt(path), projectDir)
-  if (!file.ok) return failure(errorMsg)
-  const summary = renderFileSummary(file.value, { path }) || renderFileSummary(file.value)
+  let fileValue = preloadedFileValue
+  if (!fileValue) {
+    const file = await loadFile(state, stripAt(path), projectDir)
+    if (!file.ok) return failure(errorMsg)
+    fileValue = file.value
+  }
+  const summary = renderFileSummary(fileValue, { path }) || renderFileSummary(fileValue)
   return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${summary}`)
 }
 
@@ -105,7 +109,10 @@ async function handleEdit(state, params) {
   return state.io.withLock(b.path, async () => {
     const data = await state.io.read(b.path).catch(e => failure(`Failed to read: ${e.message}`))
     if (!data.ok && data.error) return data
-    if (registry.mtimeChanged(b.path, data.mtimeMs)) return appendSummary(state, b.path, "File changed outside editplus.", params.projectDir)
+    if (registry.mtimeChanged(b.path, data.mtimeMs)) {
+      const structure = detectStructure(b.path, data.whole_content)
+      return appendSummary(state, b.path, "File changed outside editplus.", params.projectDir, { path: b.path, mtimeMs: data.mtimeMs, lines: data.lines, whole_content: data.whole_content, structure })
+    }
 
     const ins = splitReplacement(params.content, endingOf(data.lines[b.line]) || "\n")
     const newLines = [...data.lines.slice(0, b.line), ...ins, ...data.lines.slice(e.line)]
@@ -139,13 +146,12 @@ async function handleGrep(state, params) {
   if (!params.pattern) return failure("pattern is required. Provide a JavaScript regular expression.")
   const matcher = compilePattern(params.pattern)
   if (!matcher.ok) return matcher
-  const paths = await state.expand(stripAt(params.path), params.projectDir)
+  const paths = await state.expand(stripAt(params.path), params.projectDir, params.includeIgnored)
   if (!paths.length) return failure(`No files matched ${params.path}.`)
 
-  const results = []
-  for (const path of paths) {
+  const processFile = async (path) => {
     const file = await loadFile(state, path, params.projectDir)
-    if (!file.ok) { if (paths.length === 1) return file; continue }
+    if (!file.ok) return paths.length === 1 ? file : null
     const matches = []
     for (let i = 0; i < file.value.lines.length; i++) {
       matcher.value.lastIndex = 0
@@ -153,9 +159,15 @@ async function handleGrep(state, params) {
     }
     if (matches.length) {
       if (!registry.hasFile(file.value.path)) registry.assign(file.value.path, 0, file.value.lines.length + 1)
-      results.push({ ...file.value, lines: [...file.value.lines, ""], matches, structure: detectStructure(file.value.path, file.value.whole_content) })
+      return { ...file.value, lines: [...file.value.lines, ""], matches, structure: detectStructure(file.value.path, file.value.whole_content) }
     }
+    return null
   }
+
+  const rawResults = await Promise.all(paths.map(processFile))
+  if (paths.length === 1 && rawResults[0] && rawResults[0].ok === false) return rawResults[0]
+  
+  const results = rawResults.filter(r => r && r.ok !== false)
 
   if (!results.length) return success(`No matches for ${params.pattern}`)
   return success(results.map(r => {

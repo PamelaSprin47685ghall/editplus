@@ -27,7 +27,10 @@ export function detectStructure(path, content) {
     const res = languagePack.process(content, { language: lang })
     const lines = res?.structure?.map(i => i.span?.startLine).filter(Number.isInteger)
     return lines?.length ? [...new Set(lines)].sort((a, b) => a - b) : null
-  } catch { return null }
+  } catch (err) {
+    process.stderr.write(`Warning: Failed to detect structure for ${path} (${err.message})\n`)
+    return null
+  }
 }
 
 export function blockForLine(structure, line, total) {
@@ -90,7 +93,8 @@ export function resolveSerial(registry, serial, action = "use", role = "serial")
   const num = typeof serial === "string" ? alphaToNum(serial) : serial
   const disp = typeof serial === "string" ? serial : numToAlpha(serial)
   const entry = registry.resolve(num)
-  if (!entry) return failure(`${role} ${serial} does not exist. Re-read the file and copy a current serial.`)
+  if (!entry) return failure(`${role} ${disp} does not exist. Re-read the file and copy a current serial.`)
+  if (entry.expired) return failure(`${role} ${disp} has expired (allocations exceeded). Re-read the file and copy a current serial.`)
   if (entry.external) return { ok: false, error: `File changed outside editplus since ${role} ${disp} was generated. Re-read the file before ${action}.`, path: entry.path }
   if (entry.stale) return { ok: false, error: `${role} ${disp} is stale (line was edited or deleted). Re-read the file before ${action}.`, path: entry.path }
   return success(entry)
