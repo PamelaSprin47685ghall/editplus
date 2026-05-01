@@ -25,62 +25,41 @@ export class LineRegistry {
     if (count <= 0) return []
     let state = this.#states.get(path)
     if (!state) {
-      state = { segs: [{ x: Infinity, z: Infinity }], byZ: [SENTINEL], byX: [SENTINEL] }
+      state = { zList: [], xList: [], lastZ: 0, lastX: 0 }
       this.#states.set(path, state)
     }
 
     const start = this.#nextSerial
     this.#nextSerial += count
 
-    const newIdx = state.segs.length
-    const seg = { x: start, z: line }
-    state.segs.push(seg)
+    const seg = { x: start, z: line, len: count }
+    state.zList.push(seg)
+    state.zList.sort((a, b) => a.z - b.z)
+    state.xList.push(seg)
+    state.xList.sort((a, b) => a.x - b.x)
+
     this.#pushAlloc(start, count, path)
-
-    state.byX = [...state.byX.filter(idx => idx !== SENTINEL), newIdx, SENTINEL]
-
-    const newByZ = []
-    let inserted = false
-    for (const idx of state.byZ) {
-      if (idx === SENTINEL) continue
-      if (!inserted && state.segs[idx].z > seg.z) {
-        newByZ.push(newIdx)
-        inserted = true
-      }
-      newByZ.push(idx)
-    }
-    if (!inserted) newByZ.push(newIdx)
-    newByZ.push(SENTINEL)
-    state.byZ = newByZ
-
     return Array.from({ length: count }, (_, index) => start + index)
   }
 
   serialForLine(path, line) {
     const state = this.#states.get(path)
-    if (!state) return undefined
-    let zIdx = 0
-    let nextZ = state.segs[state.byZ[zIdx + 1]].z
-    while (line >= nextZ && zIdx < state.byZ.length - 2) {
-      zIdx++
-      nextZ = state.segs[state.byZ[zIdx + 1]].z
-    }
-    const seg = state.segs[state.byZ[zIdx]]
-    const serial = seg.x + (line - seg.z)
+    if (!state || state.zList.length === 0) return undefined
 
-    // A mid segment (high x at low z) may own this serial instead.
-    // Scan byX to find the actual x-owner.
-    let xIdx = -1
-    for (const idx of state.byX) {
-      if (state.segs[idx].x > serial) break
-      xIdx = idx
-    }
-    if (xIdx !== -1 && xIdx !== state.byZ[zIdx]) {
-      const xSeg = state.segs[xIdx]
-      return xSeg.x + (line - xSeg.z)
+    const zList = state.zList
+    let i = Math.min(state.lastZ, zList.length - 1)
+
+    while (i > 0 && line < zList[i].z) i--
+    while (i < zList.length - 1 && line >= zList[i + 1].z) i++
+
+    state.lastZ = i
+    const seg = zList[i]
+
+    if (line >= seg.z && line < seg.z + seg.len) {
+      return seg.x + (line - seg.z)
     }
 
-    return serial
+    return undefined
   }
 
   createCursor(path) {
@@ -129,24 +108,19 @@ export class LineRegistry {
     }
 
     const state = this.#states.get(path)
-    if (!state) return undefined
+    if (!state || state.xList.length === 0) return undefined
 
-    let prevIdx = -1
-    for (const idx of state.byX) {
-      if (state.segs[idx].x > serial) break
-      prevIdx = idx
-    }
+    const xList = state.xList
+    let i = Math.min(state.lastX, xList.length - 1)
 
-    if (prevIdx !== -1) {
-      const seg = state.segs[prevIdx]
-      if (seg.x !== Infinity) {
-        const line = seg.z + (serial - seg.x)
-        const activeSerial = this.serialForLine(path, line)
-        if (activeSerial !== serial) {
-          return { path, line: -1, stale: true } // Stale serial rejected
-        }
-        return { path, line: Math.max(0, line), stale: false }
-      }
+    while (i > 0 && serial < xList[i].x) i--
+    while (i < xList.length - 1 && serial >= xList[i + 1].x) i++
+
+    state.lastX = i
+    const seg = xList[i]
+
+    if (serial >= seg.x && serial < seg.x + seg.len) {
+      return { path, line: seg.z + (serial - seg.x), stale: false }
     }
 
     return { path, line: -1, stale: true }
@@ -159,72 +133,78 @@ export class LineRegistry {
     const delta = insertedLineCount - (hi - lo)
     const left = []
     const right = []
+    const splits = new Map()
+    const drops = new Set()
 
-    for (let j = 0; j < state.byZ.length - 1; j++) {
-      const idx = state.byZ[j]
-      const seg = state.segs[idx]
-      const nextZ = state.segs[state.byZ[j + 1]].z
-      const count = nextZ - seg.z
+    for (let i = 0; i < state.zList.length; i++) {
+      const seg = state.zList[i]
+      const segEnd = seg.z + seg.len
 
-      if (seg.z + count <= lo) {
-        left.push({ idx, x: seg.x, z: seg.z })
-        continue
-      }
-
-      if (seg.z >= hi) {
-        const newSeg = { x: seg.x, z: seg.z + delta }
-        state.segs.push(newSeg)
-        right.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
-        continue
-      }
-
-      if (seg.z < lo) {
-        left.push({ idx, x: seg.x, z: seg.z })
-      }
-
-      if (seg.z + count > hi) {
-        const dropCount = hi - seg.z
-        const newSeg = { x: seg.x + dropCount, z: hi + delta }
-        state.segs.push(newSeg)
-        right.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
+      if (segEnd <= lo) {
+        left.push(seg)
+      } else if (seg.z >= hi) {
+        seg.z += delta
+        right.push(seg)
+      } else if (seg.z < lo && segEnd > hi) {
+        const rightSeg = { x: seg.x + (hi - seg.z), z: hi + delta, len: segEnd - hi }
+        seg.len = lo - seg.z
+        left.push(seg)
+        right.push(rightSeg)
+        splits.set(seg, rightSeg)
+      } else if (seg.z < lo) {
+        seg.len = lo - seg.z
+        left.push(seg)
+      } else if (segEnd > hi) {
+        seg.x += (hi - seg.z)
+        seg.len = segEnd - hi
+        seg.z = hi + delta
+        right.push(seg)
+      } else {
+        drops.add(seg)
       }
     }
 
     let newSerials = []
-    const mid = []
+    let midSeg = null
     if (insertedLineCount > 0) {
       const start = this.#nextSerial
       this.#nextSerial += insertedLineCount
-      const newSeg = { x: start, z: lo }
-      state.segs.push(newSeg)
+      midSeg = { x: start, z: lo, len: insertedLineCount }
       this.#pushAlloc(start, insertedLineCount, path)
-      mid.push({ idx: state.segs.length - 1, x: newSeg.x, z: newSeg.z })
       newSerials = Array.from({ length: insertedLineCount }, (_, i) => start + i)
     }
 
-    state.byZ = [
-      ...left.map(s => s.idx),
-      ...mid.map(s => s.idx),
-      ...right.map(s => s.idx),
-      SENTINEL,
-    ]
+    state.zList = [...left]
+    if (midSeg) state.zList.push(midSeg)
+    state.zList.push(...right)
 
-    state.byX = [
-      ...left.map(s => s.idx),
-      ...right.map(s => s.idx),
-      ...mid.map(s => s.idx),
-    ].sort((a, b) => state.segs[a].x - state.segs[b].x)
-    // byX must be sorted by seg.x ascending for resolve()'s linear scan.
-    // left segs keep original x, right segs get shifted x (original + dropCount),
-    // mid segs get brand-new serials. But across multiple edits, left segs from
-    // different z-ranges can have larger x than right/mid segs.
-    // Explicit sort guarantees the ordering invariant.
+    // X-order: one-pass merge. Base = survivors (in x-order). Inserts = splits + mid.
+    const base = []
+    const inserts = []
+    for (let i = 0; i < state.xList.length; i++) {
+      const seg = state.xList[i]
+      if (drops.has(seg)) continue
+      base.push(seg)
+      const rightSeg = splits.get(seg)
+      if (rightSeg) inserts.push(rightSeg)
+    }
+    if (midSeg) inserts.push(midSeg)
+    inserts.sort((a, b) => a.x - b.x)
+
+    const merged = []
+    let bi = 0, ii = 0
+    while (bi < base.length && ii < inserts.length) {
+      if (base[bi].x <= inserts[ii].x) merged.push(base[bi++])
+      else merged.push(inserts[ii++])
+    }
+    while (bi < base.length) merged.push(base[bi++])
+    while (ii < inserts.length) merged.push(inserts[ii++])
+    state.xList = merged
 
     return newSerials
   }
 
   noteMtime(path, mtimeMs) { this.#mtimes.set(path, mtimeMs) }
-
   mtimeChanged(path, mtimeMs) { return this.#mtimes.has(path) && Math.abs(this.#mtimes.get(path) - mtimeMs) > 100 }
 
   reset() {
@@ -235,39 +215,38 @@ export class LineRegistry {
     this.#minAllocatedSerial = 1
     this.#cleared.clear()
   }
+
+  // Exposed for serialForLine fallback in text.js — paths are stable
+  _getPathForSerial(serial) { return this.#getPathForSerial(serial) }
 }
 
 export const registry = new LineRegistry()
 
 export class SerialCursor {
-  #segs
-  #byZ
-  #byX
-  #zIdx = 0
+  #zList
+  #xList
+  #zIndex = 0
+  #xIndex = 0
 
   constructor(state) {
-    this.#segs = state.segs
-    this.#byZ = state.byZ
-    this.#byX = state.byX
+    this.#zList = state.zList
+    this.#xList = state.xList
   }
 
   serialForLine(line) {
-    let zIdx = this.#zIdx
-    while (zIdx < this.#byZ.length - 2 && line >= this.#segs[this.#byZ[zIdx + 1]].z) zIdx++
-    this.#zIdx = zIdx
-    const seg = this.#segs[this.#byZ[zIdx]]
-    const serial = seg.x + (line - seg.z)
+    if (this.#zList.length === 0) return undefined
 
-    let xIdx = -1
-    for (const idx of this.#byX) {
-      if (this.#segs[idx].x > serial) break
-      xIdx = idx
-    }
-    if (xIdx !== -1 && xIdx !== this.#byZ[zIdx]) {
-      const xSeg = this.#segs[xIdx]
-      return xSeg.x + (line - xSeg.z)
-    }
+    let i = Math.min(this.#zIndex, this.#zList.length - 1)
 
-    return serial
+    while (i > 0 && line < this.#zList[i].z) i--
+    while (i < this.#zList.length - 1 && line >= this.#zList[i + 1].z) i++
+
+    this.#zIndex = i
+    const seg = this.#zList[i]
+
+    if (line >= seg.z && line < seg.z + seg.len) return seg.x + (line - seg.z)
+
+
+    return undefined
   }
 }
