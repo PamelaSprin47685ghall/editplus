@@ -180,8 +180,10 @@ async function handleEdit(state, params) {
     for (let i = 0; i < insertedLines.length; i++) {
       diffLines.push(`+${pad(begin.value.line + i + 1)} ${stripNewline(insertedLines[i])}`)
     }
+    let newLineOffset = begin.value.line + insertedLines.length
     for (let i = end.value.line; i < endContext; i++) {
-      diffLines.push(` ${pad(i + 1)} ${stripNewline(data.lines[i])}`)
+      diffLines.push(` ${pad(newLineOffset + 1)} ${stripNewline(data.lines[i])}`)
+      newLineOffset++
     }
     if (endContext < data.lines.length) diffLines.push(` ${" ".repeat(lineNumWidth)} ...`)
     const diff = diffLines.join("\n")
