@@ -50,24 +50,28 @@ async function loadFile(state, path, cwd, options = {}) {
   return success({ path: file.value, ...data })
 }
 
+function renderFileSummary(fileValue, params = {}) {
+  const serials = registry.getSerials(fileValue.path, fileValue.lines.length)
+  if (fileValue.lines.length === 0) return `${numToAlpha(serials[0])}|\n`
+
+  const range = readRange(registry, params, fileValue)
+  if (!range.ok) return null
+
+  const lines = [...fileValue.lines, ""]
+  const text = range.value.indexes
+    ? formatSerialIndexes(serials, lines, [...range.value.indexes, fileValue.lines.length].sort((a, b) => a - b))
+    : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
+
+  return range.value.indexes ? `${range.value.heading}\n\n${text}\n\n${range.value.hint}` : text
+}
+
 async function appendSummary(state, path, errorMsg, projectDir) {
   if (!path) return failure(errorMsg)
   const file = await loadFile(state, stripAt(path), projectDir, { failOnExternalChange: false })
   if (!file.ok) return failure(errorMsg)
-  if (file.value.lines.length === 0) {
-    const serials = registry.getSerials(file.value.path, 0)
-    return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${numToAlpha(serials[0])}|\n`)
-  }
-  const fallbackRange = readRange(registry, { path }, file.value)
-  const serials = registry.getSerials(file.value.path, file.value.lines.length)
-  const lines = [...file.value.lines, ""]
-  const text = fallbackRange.value.indexes
-    ? formatSerialIndexes(serials, lines, [...fallbackRange.value.indexes, file.value.lines.length].sort((a, b) => a - b))
-    : formatSerialLines(serials, lines, fallbackRange.value.from, lines.length)
-  const fullRender = fallbackRange.value.indexes
-    ? `${fallbackRange.value.heading}\n\n${text}\n\n${fallbackRange.value.hint}`
-    : text
-  return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${fullRender}`)
+  
+  const summary = renderFileSummary(file.value, { path }) || renderFileSummary(file.value)
+  return failure(`${errorMsg}\n\n--- Auto-attached current file summary ---\n${summary}`)
 }
 
 async function handleRead(state, params) {
@@ -94,26 +98,10 @@ async function handleRead(state, params) {
 
   if (!file.ok) return file
 
-  if (file.value.lines.length === 0) {
-    const serials = registry.getSerials(file.value.path, 0); const serial = serials[0]
-    const text = `${numToAlpha(serial)}|\n`
-    if (rangeError) return failure(`${rangeError}\n\n--- Auto-attached current file summary ---\n${text}`)
-    return success(text)
-  }
-
   if (!rangeError) {
-    const range = readRange(registry, params, file.value)
-    if (range.ok) {
-      const serials = registry.getSerials(file.value.path, file.value.lines.length)
-      const lines = [...file.value.lines, ""]
-      const text = range.value.indexes
-        ? formatSerialIndexes(serials, lines, [...range.value.indexes, file.value.lines.length].sort((a, b) => a - b))
-        : formatSerialLines(serials, lines, range.value.from, params.begin == null ? lines.length : range.value.to)
-      return params.begin == null
-        ? success(`${range.value.heading}\n\n${text}\n\n${range.value.hint}`)
-        : success(text)
-    }
-    rangeError = range.error
+    const summary = renderFileSummary(file.value, params)
+    if (summary !== null) return success(summary)
+    rangeError = readRange(registry, params, file.value).error
   }
 
   return appendSummary(state, params.path, rangeError, params.projectDir)
@@ -121,61 +109,40 @@ async function handleRead(state, params) {
 
 async function handleEdit(state, params) {
   params = { ...params, begin: typeof params.begin === "string" ? alphaToNum(params.begin) : params.begin, endExclusive: typeof params.endExclusive === "string" ? alphaToNum(params.endExclusive) : params.endExclusive }
+  
   const validation = validateEditParams(params)
   if (!validation.ok) return validation
 
   const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
   const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
+  
   if (!begin.ok) return begin.path ? appendSummary(state, begin.path, begin.error, params.projectDir) : begin
   if (!end.ok) return end.path ? appendSummary(state, end.path, end.error, params.projectDir) : end
+  
   const boundary = validateBoundary(begin.value, end.value)
   if (!boundary.ok) return appendSummary(state, begin.value.path, boundary.error, params.projectDir)
 
   return state.io.withLock(begin.value.path, async () => {
-    const prepared = await prepareEdit(state, params)
-    if (!prepared.ok) {
-      if (prepared.error && prepared.error.includes("File changed outside editplus")) {
-        return appendSummary(state, begin.value.path, prepared.error, params.projectDir)
-      }
-      return prepared
+    const data = await state.io.read(begin.value.path).catch(error => failure(`Failed to read before edit: ${error.message}`))
+    if (!data.ok && data.error) return data
+    if (registry.mtimeChanged(begin.value.path, data.mtimeMs)) {
+      return appendSummary(state, begin.value.path, "File changed outside editplus. Re-read it before editing.", params.projectDir)
     }
-    await state.io.write(prepared.value.path, prepared.value.lines)
-    const updated = await state.io.read(prepared.value.path)
-      .catch(() => null)
-    if (updated) registry.noteMtime(prepared.value.path, updated.mtimeMs)
+
+    const insertedLines = splitReplacement(params.content, endingOf(data.lines[begin.value.line]) || "\n")
+    const newLines = [...data.lines.slice(0, begin.value.line), ...insertedLines, ...data.lines.slice(end.value.line)]
+    
+    await state.io.write(begin.value.path, newLines)
+    const updated = await state.io.read(begin.value.path).catch(() => null)
+    if (updated) registry.noteMtime(begin.value.path, updated.mtimeMs)
 
     const newSerials = registry.edit(
-      prepared.value.path,
-      prepared.value.begin.line,
-      prepared.value.end.line,
-      prepared.value.insertedLines.length,
+      begin.value.path,
+      begin.value.line,
+      end.value.line,
+      insertedLines.length,
     )
-    return success(formatEditResult(prepared.value.path, params, newSerials))
-  })
-}
-
-async function prepareEdit(state, params) {
-  const validation = validateEditParams(params)
-  if (!validation.ok) return validation
-
-  const begin = resolveSerial(registry, params.begin, "editing", "begin serial")
-  const end = resolveSerial(registry, params.endExclusive, "editing", "endExclusive serial")
-  if (!begin.ok) return begin
-  if (!end.ok) return end
-  const boundary = validateBoundary(begin.value, end.value)
-  if (!boundary.ok) return boundary
-
-  const data = await state.io.read(begin.value.path).catch(error => failure(`Failed to read before edit: ${error.message}`))
-  if (!data.ok && data.error) return data
-  if (registry.mtimeChanged(begin.value.path, data.mtimeMs)) return failure("File changed outside editplus. Re-read it before editing.")
-
-  const insertedLines = splitReplacement(params.content, endingOf(data.lines[begin.value.line]) || "\n")
-  return success({
-    path: begin.value.path,
-    begin: begin.value,
-    end: end.value,
-    insertedLines,
-    lines: [...data.lines.slice(0, begin.value.line), ...insertedLines, ...data.lines.slice(end.value.line)],
+    return success(formatEditResult(begin.value.path, params, newSerials))
   })
 }
 
