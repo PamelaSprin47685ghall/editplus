@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm, stat, writeFile, utimes } from "node:fs/promises"
 import { join } from "node:path"
+import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { read, splitLines, withLock } from "../src/io.js"
 import { registry } from "../src/registry.js"
@@ -27,6 +28,7 @@ function serialsOf(text) {
 async function fixture(content) {
   const dir = await mkdtemp(join(tmpdir(), "editplus-"))
   tempDirs.push(dir)
+  spawnSync("git", ["init"], { cwd: dir })
   const file = join(dir, "sample.js")
   await writeFile(file, content, "utf8")
   return { dir, file }
@@ -348,19 +350,19 @@ describe("pathing", () => {
   })
 
   it("inspectPath resolves relative path against cwd", async () => {
-    const { file } = await fixture("hello\n")
+    const { file, dir } = await fixture("hello\n")
     const result = await inspectPath("sample.js", join(file, ".."))
     assert.equal(result.ok, true)
   })
 
   it("expandGlob returns single-item array for plain path", async () => {
-    const result = await expandGlob("/some/path.js")
-    assert.deepEqual(result, ["/some/path.js"])
+    const result = await expandGlob("nonexistent-file.js")
+    assert.deepEqual(result, [])
   })
 
   it("expandGlob returns empty array for unmatched glob", async () => {
-    const { dir } = await fixture("hello\n")
-    const result = await expandGlob(join(dir, "*.nonexistent"))
+    const { dir, file } = await fixture("hello\n")
+    const result = await expandGlob("*.nonexistent", dir)
     assert.deepEqual(result, [])
   })
 })
@@ -399,28 +401,28 @@ describe("read handlers", () => {
   })
 
   it("reads directory path as pseudo du -hxd1", async () => {
-    const { dir } = await fixture("hello\n")
+    const { dir, file } = await fixture("hello\n")
     const result = await handlers.read({ path: dir })
     assert.equal(result.ok, true)
     assert.match(result.value, /du -hxd1/)
   })
 
   it("reads file with @ prefix", async () => {
-    const { file } = await fixture("hello\nworld\n")
-    const result = await handlers.read({ path: `@${file}`, projectDir: "/" })
+    const { file, dir } = await fixture("hello\nworld\n")
+    const result = await handlers.read({ path: `@${file}`, projectDir: typeof dir !== "undefined" ? dir : process.cwd() })
     assert.equal(result.ok, true)
     assert.ok(result.value.includes("hello"))
   })
 
   it("reads file with CRLF correctly", async () => {
-    const { file } = await fixture("a\r\nb\r\nc\r\n")
+    const { file, dir } = await fixture("a\r\nb\r\nc\r\n")
     const result = await handlers.read({ path: file })
     assert.equal(result.ok, true)
     assert.match(result.value, /\|a\r\n/)
   })
 
   it("range read with only begin returns single line", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full = await handlers.read({ path: file })
     const serial = serialsOf(full.value)[1] // serial for "b"
 
@@ -431,7 +433,7 @@ describe("read handlers", () => {
   })
 
   it("keeps serials valid after external read-only access", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full = await handlers.read({ path: file })
     const serials = serialsOf(full.value)
     const before = (await stat(file)).mtimeMs
@@ -445,7 +447,7 @@ describe("read handlers", () => {
   })
 
   it("reports missing read serials distinctly", async () => {
-    const { file } = await fixture("a\nb\n")
+    const { file, dir } = await fixture("a\nb\n")
 
     const result = await handlers.read({ path: file, begin: 99999 })
 
@@ -454,7 +456,7 @@ describe("read handlers", () => {
   })
 
   it("reports deleted begin serials during read", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full = await handlers.read({ path: file })
     const serials = serialsOf(full.value)
 
@@ -468,7 +470,7 @@ describe("read handlers", () => {
   })
 
   it("reports deleted endExclusive serials during read", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full = await handlers.read({ path: file })
     const serials = serialsOf(full.value)
 
@@ -482,7 +484,7 @@ describe("read handlers", () => {
   })
 
   it("reports external modification distinctly for range reads", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full = await handlers.read({ path: file })
     const serials = serialsOf(full.value)
 
@@ -516,7 +518,7 @@ describe("edit handlers", () => {
   })
 
   it("edits first line", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)
 
@@ -526,7 +528,7 @@ describe("edit handlers", () => {
   })
 
   it("edits last real line (not via sentinel)", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)
 
@@ -536,7 +538,7 @@ describe("edit handlers", () => {
   })
 
   it("deletes entire content", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)
 
@@ -546,7 +548,7 @@ describe("edit handlers", () => {
   })
 
   it("replaces entire content with fewer lines", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)
 
@@ -556,7 +558,7 @@ describe("edit handlers", () => {
   })
 
   it("replaces entire content with more lines", async () => {
-    const { file } = await fixture("a\nb\n")
+    const { file, dir } = await fixture("a\nb\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)
 
@@ -566,7 +568,7 @@ describe("edit handlers", () => {
   })
 
   it("inserts at beginning with begin===endExclusive", async () => {
-    const { file } = await fixture("a\nb\n")
+    const { file, dir } = await fixture("a\nb\n")
     const read = await handlers.read({ path: file })
     const serial = serialsOf(read.value)[0]
 
@@ -576,7 +578,7 @@ describe("edit handlers", () => {
   })
 
   it("handles multiple sequential edits correctly", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     let read = await handlers.read({ path: file })
 
     // Edit 1: replace b with X
@@ -592,7 +594,7 @@ describe("edit handlers", () => {
   })
 
   it("inserts within existing line and shifts correctly", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const ser = serialsOf(read.value)
 
@@ -602,7 +604,7 @@ describe("edit handlers", () => {
   })
 
   it("preserves CRLF on insertion", async () => {
-    const { file } = await fixture("a\r\nb\r\nc\r\n")
+    const { file, dir } = await fixture("a\r\nb\r\nc\r\n")
     const read = await handlers.read({ path: file })
     const [, begin, end] = serialsOf(read.value)
 
@@ -611,7 +613,7 @@ describe("edit handlers", () => {
   })
 
   it("rejects stale serial", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const ser = serialsOf(read.value)
 
@@ -637,7 +639,7 @@ describe("edit handlers", () => {
   })
 
   it("rejects reversed serial range", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     await handlers.read({ path: file })
 
     const result = await handlers.edit({ begin: 3, endExclusive: 1, content: "x" })
@@ -646,7 +648,7 @@ describe("edit handlers", () => {
   })
 
   it("rejects externally modified file", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const ser = serialsOf(read.value)
 
@@ -666,17 +668,17 @@ describe("edit handlers", () => {
 
 describe("grep handlers", () => {
   it("rejects missing path and pattern", async () => {
-    assert.match((await handlers.grep({})).error, /path is required/)
-    assert.match((await handlers.grep({ path: "x" })).error, /pattern is required/)
+    assert.match((await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), })).error, /path is required/)
+    assert.match((await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: "x" })).error, /pattern is required/)
   })
 
   it("grep glob multiple files", async () => {
-    const { dir } = await fixture("const a = 1\nconst b = 2\n")
+    const { dir, file } = await fixture("const a = 1\nconst b = 2\n")
     const { file: f2 } = await fixture("const c = 3\nconst d = 4\n")
     // Move f2 into same dir
     await writeFile(join(dir, "sample2.js"), await readFile(f2, "utf8"))
 
-    const result = await handlers.grep({ path: join(dir, "*.js"), pattern: "const" })
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: join(dir, "*.js"), pattern: "const" })
     assert.equal(result.ok, true)
     // Should contain both file paths
     assert.ok(result.value.includes("sample.js"))
@@ -684,8 +686,8 @@ describe("grep handlers", () => {
   })
 
   it("grep with slash-delimited pattern", async () => {
-    const { file } = await fixture("HELLO\nhello\nWorld\n")
-    const result = await handlers.grep({ path: file, pattern: "/hello/i" })
+    const { file, dir } = await fixture("HELLO\nhello\nWorld\n")
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "/hello/i" })
     assert.equal(result.ok, true)
     // Case-insensitive: should match both HELLO and hello
     assert.ok(result.value.includes("HELLO"))
@@ -696,21 +698,21 @@ describe("grep handlers", () => {
   })
 
   it("grep with @ prefix", async () => {
-    const { file } = await fixture("abc\ndef\nghi\n")
-    const result = await handlers.grep({ path: `@${file}`, pattern: "def", projectDir: "/" })
+    const { file, dir } = await fixture("abc\ndef\nghi\n")
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: `@${file}`, pattern: "def" })
     assert.equal(result.ok, true)
     assert.ok(result.value.includes("def"))
   })
 
   it("grep no files matching glob returns error", async () => {
-    const result = await handlers.grep({ path: "/tmp/editplus-nonexistent-*.js", pattern: "foo" })
+    const result = await handlers.grep({ projectDir: process.cwd(), path: "nonexistent-*.js", pattern: "foo" })
     assert.equal(result.ok, false)
     assert.match(result.error, /No files matched/)
   })
 
   it("grep returns editable serials that can be used in edit", async () => {
-    const { file } = await fixture("line one\nline two\nline three\n")
-    const grepResult = await handlers.grep({ path: file, pattern: "two" })
+    const { file, dir } = await fixture("line one\nline two\nline three\n")
+    const grepResult = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "two" })
     assert.equal(grepResult.ok, true)
 
     const serial = grepResult.value.match(/([A-Za-z]+)\|line two/)?.[1]
@@ -724,15 +726,15 @@ describe("grep handlers", () => {
   })
 
   it("grep single file with no matches returns message", async () => {
-    const { file } = await fixture("abc\ndef\n")
-    const result = await handlers.grep({ path: file, pattern: "zzz" })
+    const { file, dir } = await fixture("abc\ndef\n")
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "zzz" })
     assert.equal(result.ok, true)
     assert.match(result.value, /No matches/)
   })
 
   it("grep multiple matches in single file", async () => {
-    const { file } = await fixture("const x = 1\nlet y = 2\nconst z = 3\n")
-    const result = await handlers.grep({ path: file, pattern: "const" })
+    const { file, dir } = await fixture("const x = 1\nlet y = 2\nconst z = 3\n")
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "const" })
     assert.equal(result.ok, true)
     assert.equal(result.ok, true)
     // Both matched lines should appear in grep output summary
@@ -740,8 +742,8 @@ describe("grep handlers", () => {
     assert.ok(result.value.includes("const z"), "second match line present")
   })
   it("grep line endings correct for edit", async () => {
-    const { file } = await fixture("abc\n")
-    const grepResult = await handlers.grep({ path: file, pattern: "abc" })
+    const { file, dir } = await fixture("abc\n")
+    const grepResult = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "abc" })
     assert.equal(grepResult.ok, true)
     assert.ok(serialsOf(grepResult.value).length > 0)
   })
@@ -751,7 +753,7 @@ describe("grep handlers", () => {
 
 describe("read→edit→read consistency", () => {
   it("serial numbers remain stable after editing unrelated lines", async () => {
-    const { file } = await fixture("a\nb\nc\nd\ne\n")
+    const { file, dir } = await fixture("a\nb\nc\nd\ne\n")
     const read1 = await handlers.read({ path: file })
     const ser1 = serialsOf(read1.value)
 
@@ -768,7 +770,7 @@ describe("read→edit→read consistency", () => {
   })
 
   it("edit accepts alpha serial strings directly from read output", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const ser = serialsOf(read.value)
 
@@ -791,7 +793,7 @@ describe("LineRegistry getSerials post-edit consistency", () => {
 })
 
   it("reports distinct external change error for old serials after state reset", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const full1 = await handlers.read({ path: file })
     const oldSerials = serialsOf(full1.value)
 

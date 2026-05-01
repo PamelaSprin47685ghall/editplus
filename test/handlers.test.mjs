@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { createHandlers } from "../src/handlers.js"
 import { registry } from "../src/registry.js"
@@ -39,7 +40,7 @@ describe("read", () => {
   })
 
   it("sentinel serial shows on last line for empty content", async () => {
-    const { file } = await fixture("")
+    const { file, dir } = await fixture("")
     const result = await handlers.read({ path: file })
     assert.equal(result.ok, true)
     assert.match(result.value, /([A-Z]+)\|\s*\n/)
@@ -48,7 +49,7 @@ describe("read", () => {
 
 describe("edit", () => {
   it("replaces a line identified by serial", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const [, begin, end] = serialsOf(read.value)
 
@@ -59,7 +60,7 @@ describe("edit", () => {
   })
 
   it("inserts, deletes, and returns new serials", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const r1 = await handlers.read({ path: file })        // line 0:a 1:b 2:c 3:(sentinel)
     const r2 = await handlers.read({ path: file })         // fresh serials for same lines
 
@@ -85,7 +86,7 @@ describe("edit", () => {
   })
 
   it("uses sentinel serial as endExclusive to edit the last line", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const serials = serialsOf(read.value)        // [a, b, c, sentinel]
 
@@ -96,7 +97,7 @@ describe("edit", () => {
   })
 
   it("inserts at a line when begin and endExclusive resolve to the same line", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const r1 = await handlers.read({ path: file })
     const r2 = await handlers.read({ path: file })  // second read, same content, different serials
 
@@ -111,7 +112,7 @@ describe("edit", () => {
   })
 
   it("edits an empty file using sentinel begin and endExclusive", async () => {
-    const { file } = await fixture("")
+    const { file, dir } = await fixture("")
     const read = await handlers.read({ path: file })
     const serial = read.value.match(/([A-Z]+)\|/)?.[1]
 
@@ -122,7 +123,7 @@ describe("edit", () => {
   })
 
   it("preserves CRLF replacement ending", async () => {
-    const { file } = await fixture("a\r\nb\r\nc\r\n")
+    const { file, dir } = await fixture("a\r\nb\r\nc\r\n")
     const read = await handlers.read({ path: file })
     const [, begin, end] = serialsOf(read.value)
 
@@ -132,7 +133,7 @@ describe("edit", () => {
   })
 
   it("serializes concurrent edits to the same file", async () => {
-    const { file } = await fixture("a\nb\nc\n")
+    const { file, dir } = await fixture("a\nb\nc\n")
     const read = await handlers.read({ path: file })
     const [sA, sB, sC, sEnd] = serialsOf(read.value)
 
@@ -212,7 +213,7 @@ describe("edit", () => {
 describe("grep", () => {
   it("matches strings, regexes, and exposes editable serials", async () => {
     const { dir, file } = await fixture("const alpha = 1\nconst beta = 2\n")
-    const result = await handlers.grep({ path: join(dir, "*.js"), pattern: "alpha|beta" })
+    const result = await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: join(dir, "*.js"), pattern: "alpha|beta" })
     const serial = result.value.match(/([A-Z]+)\|const alpha/)?.[1]
 
     assert.equal(result.ok, true)
@@ -222,16 +223,17 @@ describe("grep", () => {
   })
 
   it("handles no matches and invalid regex errors", async () => {
-    const { file } = await fixture("abc\n")
+    const { file, dir } = await fixture("abc\n")
 
-    assert.match((await handlers.grep({ path: file, pattern: "zzz" })).value, /No matches/)
-    assert.match((await handlers.grep({ path: file, pattern: "[" })).error, /Invalid regular expression/)
+    assert.match((await handlers.grep({ projectDir: dir, path: file, pattern: "zzz" })).value, /No matches/)
+    assert.match((await handlers.grep({ projectDir: typeof dir !== "undefined" ? dir : process.cwd(), path: file, pattern: "[" })).error, /Invalid regular expression/)
   })
 })
 
 async function fixture(content) {
   const dir = await mkdtemp(join(tmpdir(), "editplus-"))
   tempDirs.push(dir)
+  spawnSync("git", ["init"], { cwd: dir })
   const file = join(dir, "sample.js")
   await writeFile(file, content, "utf8")
   return { dir, file }

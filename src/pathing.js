@@ -15,34 +15,16 @@ export async function inspectPath(input, cwd) {
 }
 
 export async function expandGlob(input, cwd, includeIgnored = false) {
-  const isGitRepo = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: cwd ?? process.cwd() }).status === 0
-  
-  if (isGitRepo) {
-    const args = ["ls-files", "-z", "--cached", "--others"]
-    if (!includeIgnored) args.push("--exclude-standard")
-    args.push("--", input)
-    
-    const result = spawnSync("git", args, { cwd: cwd ?? process.cwd(), encoding: "utf8" })
-    if (result.status === 0) {
-      const paths = result.stdout.split('\0').filter(Boolean)
-      if (paths.length > 0) return [...new Set(paths)].sort()
-    }
+  const execCwd = cwd ?? process.cwd()
+  const args = ["ls-files", "-z", "--cached", "--others"]
+  if (!includeIgnored) args.push("--exclude-standard")
+  args.push("--", input)
+
+  const result = spawnSync("git", args, { cwd: execCwd, encoding: "utf8" })
+  if (result.error || result.status !== 0) {
+    throw new Error("grep tool requires a git repository. Git command failed: " + (result.stderr || result.error?.message || "Unknown error"))
   }
 
-  // Fallback to node glob for non-git repos or empty git results
-  const { glob } = await import("node:fs/promises")
-  let pattern = input
-  if (!/[*?[]/.test(pattern)) {
-    const fullPath = pattern.startsWith("/") ? pattern : resolve(cwd ?? process.cwd(), pattern)
-    const st = await stat(fullPath).catch(() => null)
-    if (st && st.isDirectory()) {
-      pattern = pattern.replace(/\/$/, "") + "/**/*"
-    } else {
-      return [pattern]
-    }
-  }
-
-  const paths = []
-  for await (const path of glob(pattern, { cwd: cwd ?? process.cwd() })) paths.push(path)
+  const paths = result.stdout.split('\0').filter(Boolean)
   return [...new Set(paths)].sort()
 }

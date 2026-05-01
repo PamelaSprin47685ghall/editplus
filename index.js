@@ -25,7 +25,8 @@ const editParams = {
 const grepParams = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path, directory, or glob pattern to search." },
+    path: { type: "string", description: "Git pathspec, directory, or file path to search." },
+    includeIgnored: { type: "boolean", description: "If true, searches inside .gitignore ignored files/directories. Default is false." },
     pattern: { type: "string", description: "JavaScript regular expression pattern." },
   },
   required: ["path", "pattern"],
@@ -84,7 +85,9 @@ export default function (pi) {
     promptGuidelines: [
       "Use grep when you know a token or regex and need editable serials.",
       "grep serials map to real files and can be passed directly to edit.",
-      "Path may be a single file, a directory (searched recursively), or a glob.",
+      "Path uses Git pathspec syntax (e.g., src, src/**/*.js) and respects .gitignore natively.",
+      "Use includeIgnored: true to bypass .gitignore.",
+      "Requires a Git repository.",
       "Serials from grep output belong to the matched file only — do not use them on other files.",
       "Serials from ANY previous grep remain valid; you do not need to re-read before editing.",
     ],
