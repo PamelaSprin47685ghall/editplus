@@ -100,3 +100,38 @@ state.byX = [
 - `src/registry.js` — `LineRegistry` 类
 - `src/registry.js` 的 `edit()` 方法
 - 猴子测试记录见 HINTS.md 和 commit a262a75
+
+## 附加发现：serialForLine 的 x 边界校验
+
+修复 byX 排序后还发现了一个二次问题：
+
+`serialForLine(path, line)` 通过 byZ 找到段，再用 `seg.x + (line - seg.z)` 算序列号。但 mid 段（x 高，z 低）会切断后续 right 段（x 低，z 高）的 x 范围——right 段算出的序列号可能落入 mid 段的领地。
+
+```js
+seg[6]: { x:11, z:6 }     ← right 段，x 低，z 高
+seg[7]: { x:104, z:2 }    ← mid 段，x 高（#nextSerial），z 低
+serialForLine(line=99): byZ 找到 seg[6], 11+(99-6)=104
+                        但 104 是 seg[7] 的起始序列号！
+```
+
+### 修复
+
+算出 serial 后扫描 byX 找到真正的 x 归属段，如果与 z 段不一致则用 x 段的公式重算：
+
+```js
+let xIdx = -1
+for (const idx of state.byX) {
+  if (state.segs[idx].x > serial) break
+  xIdx = idx
+}
+if (xIdx !== -1 && xIdx !== state.byZ[zIdx]) {
+  const xSeg = state.segs[xIdx]
+  return xSeg.x + (line - xSeg.z)
+}
+```
+
+这个校验加上 byX.sort() 之后，所有范围内行都能正确 resolve。
+
+### 边界 case：mid 段被删除后 x 范围失控
+
+当 mid 段因后续编辑被完全删除（wholly within edit range），其 x 边界也随之消失。剩余段的 x 范围变为无界，`serialForLine` 对超出行文件长度的行会算出不存在的序列号。在实际使用中 `serialForLine` 不会被调用给不存在的行，因此这不是运行时问题，但对正确性推理有启发。

@@ -66,7 +66,21 @@ export class LineRegistry {
       nextZ = state.segs[state.byZ[zIdx + 1]].z
     }
     const seg = state.segs[state.byZ[zIdx]]
-    return seg.x + (line - seg.z)
+    const serial = seg.x + (line - seg.z)
+
+    // A mid segment (high x at low z) may own this serial instead.
+    // Scan byX to find the actual x-owner.
+    let xIdx = -1
+    for (const idx of state.byX) {
+      if (state.segs[idx].x > serial) break
+      xIdx = idx
+    }
+    if (xIdx !== -1 && xIdx !== state.byZ[zIdx]) {
+      const xSeg = state.segs[xIdx]
+      return xSeg.x + (line - xSeg.z)
+    }
+
+    return serial
   }
 
   createCursor(path) {
@@ -228,11 +242,13 @@ export const registry = new LineRegistry()
 export class SerialCursor {
   #segs
   #byZ
+  #byX
   #zIdx = 0
 
   constructor(state) {
     this.#segs = state.segs
     this.#byZ = state.byZ
+    this.#byX = state.byX
   }
 
   serialForLine(line) {
@@ -240,6 +256,18 @@ export class SerialCursor {
     while (zIdx < this.#byZ.length - 2 && line >= this.#segs[this.#byZ[zIdx + 1]].z) zIdx++
     this.#zIdx = zIdx
     const seg = this.#segs[this.#byZ[zIdx]]
-    return seg.x + (line - seg.z)
+    const serial = seg.x + (line - seg.z)
+
+    let xIdx = -1
+    for (const idx of this.#byX) {
+      if (this.#segs[idx].x > serial) break
+      xIdx = idx
+    }
+    if (xIdx !== -1 && xIdx !== this.#byZ[zIdx]) {
+      const xSeg = this.#segs[xIdx]
+      return xSeg.x + (line - xSeg.z)
+    }
+
+    return serial
   }
 }
